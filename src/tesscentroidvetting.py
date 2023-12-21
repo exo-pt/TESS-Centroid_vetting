@@ -22,7 +22,7 @@ res = {
     'ooTransit_cadences' : None,       # no. of cadences in Out Of Transir Image
     'inTransit_margin' : None,         # In Transit windows (epochs-inTransit_margin <-> epochs+inTransit_margin)
     'ooTransit_inner_margin' : None,   # Out of Transit wibdows:
-    'ooTransit_outer_margin' : None,   #  (epochs +/- inner -~<->to eopchs +/- outer)
+    'ooTransit_outer_margin' : None,   #  (epochs +/- inner -~<->to epochs +/- outer)
     'tic_pos' : None,
     'flux_centroid_pos' : None,        #relative base 0 position
     'prf_centroid_pos' : None,         #relative base 0 position
@@ -34,12 +34,12 @@ res = {
     'img_intr' : None                  #in transit image
 }
 
-def centroid_vetting(tpf, epochs, transit_dur_tot, plot=True, **kwargs):
-    #, oot_outer_relative, oot_inner_relative, pixel_mask=None, plot=True):
+def centroid_vetting(tpf, epochs, tot_transit_dur, plot=True, **kwargs):
+    #, oot_outer_margin, oot_inner_margin, pixel_mask=None, plot=True):
     #epochs: float or list of floats
     if isinstance(epochs, float): epochs = [epochs]
     #    
-    img_diff, img_intr, img_oot = _get_in_out_diff_img(tpf, epochs, transit_dur_tot, **kwargs)
+    img_diff, img_intr, img_oot = _get_in_out_diff_img(tpf, epochs, tot_transit_dur, **kwargs)
     #
     res['img_diff'] = img_diff
     res['img_oot'] = img_oot
@@ -185,7 +185,7 @@ def centroid_vetting(tpf, epochs, transit_dur_tot, plot=True, **kwargs):
     cols=4
     fig, axes = plt.subplots(1, cols, figsize=(12.5, 4.5),subplot_kw=dict(box_aspect=1)) #,constrained_layout = True)
     axes[0].imshow(img_oot, cmap=plt.cm.viridis, origin = 'lower',aspect='auto')
-    axes[0].set_title("Mean Out of Transit Flux".format(transit_dur_tot), fontsize = 11 )
+    axes[0].set_title("Mean Out of Transit Flux".format(tot_transit_dur), fontsize = 11 )
     #display pipeline mask
     points = [[None for j in range(tpf.pipeline_mask.shape[0])] for i in range(tpf.pipeline_mask.shape[1])]
     for x in range(tpf.pipeline_mask.shape[0]):
@@ -252,7 +252,7 @@ def centroid_vetting(tpf, epochs, transit_dur_tot, plot=True, **kwargs):
     axes[1].set_yticks(np.arange(len(y_list)))
     axes[1].set_yticklabels(y_list)
     axes[1].tick_params(axis='x', labelrotation=90)
-    axes[1].set_title("Difference Image\nMean Out-In Transit Flux".format(transit_dur_tot), fontsize = 11 )
+    axes[1].set_title("Difference Image\nMean Out-In Transit Flux".format(tot_transit_dur), fontsize = 11 )
 
     axes[2].grid(lw=0.2)
     axes[2].tick_params(axis='both', which='major', labelsize=9)
@@ -345,10 +345,10 @@ def centroid_vetting(tpf, epochs, transit_dur_tot, plot=True, **kwargs):
         epochs3 = epochs.copy()
         for i,t in enumerate(epochs3):
             epochs3[i] = round(t,3)
-        fig.suptitle(TIC2str+' Sector ' +str(sector)+'            Transit epochs (BTJD)= '+str(epochs3)+'            Transit duration (hours)= '+ f'{transit_dur_tot*24:2.3f}',
+        fig.suptitle(TIC2str+' Sector ' +str(sector)+'            Transit epochs (BTJD)= '+str(epochs3)+'            Transit duration (hours)= '+ f'{tot_transit_dur*24:2.3f}',
                      fontsize=12, x=0.49, y=1.04)
     else:
-        fig.suptitle(TIC2str+' Sector ' +str(sector)+'            Total transits = '+str(ntransits)+'            Transit duration (hours)= '+ f'{transit_dur_tot*24:2.3f}',
+        fig.suptitle(TIC2str+' Sector ' +str(sector)+'            Total transits = '+str(ntransits)+'            Transit duration (hours)= '+ f'{tot_transit_dur*24:2.3f}',
                      fontsize=12, x=0.49, y=1.04)
         
     com_xlabel = "In Transit cadences: " + str(res['inTransit_cadences'])+"  (Epoch ± "+f'{res["inTransit_margin"]:2.3f}d)   '
@@ -362,8 +362,8 @@ def centroid_vetting(tpf, epochs, transit_dur_tot, plot=True, **kwargs):
 #     @noraeisner - Planet Hunters Coffee Chat - False Positives - In and Out of Flux Comparison 
 # https://github.com/noraeisner/PH_Coffee_Chat/blob/main/False%20Positive/False%20positives%20-%20(2)%20in%20out%20transit%20flux.ipynb
 #============================================================================================================
-def _get_in_out_diff_img(tpf, epochs, transit_dur_tot, **kwargs): 
-    #transit_full_tot, oot_outer_relative, oot_inner_relative, pixel_mask=None):
+def _get_in_out_diff_img(tpf, epochs, tot_transit_dur, **kwargs): 
+    #full_transit_dur, oot_outer_margin, oot_inner_margin, pixel_mask=None):
     #epochs: float or list of floats - If more than one, a mean image of all transits is calculated
     mask = False
     pixel_mask = kwargs.get('pixel_mask', None)
@@ -372,13 +372,13 @@ def _get_in_out_diff_img(tpf, epochs, transit_dur_tot, **kwargs):
     t_list = [tpf.time.value]
     if isinstance(epochs, float): epochs = [epochs]
     T0_list = epochs
-    if transit_dur_tot == 0:
-        transit_dur_tot = 0.3
-    transit_full_tot = kwargs.get('transit_full_tot', transit_dur_tot * 0.8)    
-    transit_tot_half = round(transit_dur_tot/2, 3)
-    transit_full_half = round(transit_full_tot/2, 3)
-    oot_inner_relative = kwargs.get('oot_inner_relative', round(transit_tot_half * 1.5, 3))
-    oot_outer_relative = kwargs.get('oot_outer_relative', oot_inner_relative + transit_dur_tot)
+    if tot_transit_dur == 0:
+        tot_transit_dur = 0.3
+    full_transit_dur = kwargs.get('full_transit_dur', tot_transit_dur * 0.8)    
+    transit_tot_half = round(tot_transit_dur/2, 3)
+    transit_full_half = round(full_transit_dur/2, 3)
+    oot_inner_margin = kwargs.get('oot_inner_margin', round(transit_tot_half * 1.5, 3))
+    oot_outer_margin = kwargs.get('oot_outer_margin', oot_inner_margin + tot_transit_dur)
     # loop through all of the list of PCA corrected flux vs time arrays for each marked transit-event
     imgs_intr = []; imgs_oot = []
     for idx, tpf_filt in enumerate(tpf_list): # idx is for each marked transit-event
@@ -386,7 +386,7 @@ def _get_in_out_diff_img(tpf, epochs, transit_dur_tot, **kwargs):
         intransit = 0; ootransit = 0
         for T0 in epochs:
             intr = abs(T0 - t) < transit_full_half  # mask of in transit times
-            oot = (abs(T0 - t) < oot_outer_relative) * (abs(T0 - t) > oot_inner_relative)  # mask of out transit times
+            oot = (abs(T0 - t) < oot_outer_margin) * (abs(T0 - t) > oot_inner_margin)  # mask of out transit times
             intransit = intransit + len(intr[intr==True])
             ootransit = ootransit + len(oot[oot==True])
             img_intr = np.nanmean(tpf_filt[intr,:,:], axis=0)
@@ -402,8 +402,8 @@ def _get_in_out_diff_img(tpf, epochs, transit_dur_tot, **kwargs):
         res['inTransit_cadences'] = intransit
         res['ooTransit_cadences'] = ootransit
         res['inTransit_margin'] = transit_full_half
-        res['ooTransit_inner_margin'] = oot_inner_relative
-        res['ooTransit_outer_margin'] = oot_outer_relative
+        res['ooTransit_inner_margin'] = oot_inner_margin
+        res['ooTransit_outer_margin'] = oot_outer_margin
     return img_diff, img_intr, img_oot
 
 def _get_offset(coord1,coord2):
