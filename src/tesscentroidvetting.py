@@ -18,26 +18,35 @@ import tessprfmodel as prfmodel
 
 #global dictionary for returned results
 res = {
+    'ticid' : None,
+    'sector': None,
+    'valid_transit_epochs': None,  # (list)   #     
+    'transit_duration' : None,            # in days
     'inTransit_cadences' : None,       # no. of cadences in In Transir Image
     'ooTransit_cadences' : None,       # no. of cadences in Out Of Transir Image
     'inTransit_margin' : None,         # In Transit windows (epochs-inTransit_margin <-> epochs+inTransit_margin)
     'ooTransit_inner_margin' : None,   # Out of Transit wibdows:
     'ooTransit_outer_margin' : None,   #  (epochs +/- inner -~<->to epochs +/- outer)
-    'tic_pos' : None,
-    'flux_centroid_pos' : None,        #relative base 0 position
-    'prf_centroid_pos' : None,         #relative base 0 position
+    'tic_pos' : None,                      # relative tic position to (0,0)
+    'flux_centroid_pos' : None,        #relative flux centroid position to (0,0)
+    'prf_centroid_pos' : None,         #relative prf centroid position to (0,0)
     'prf_fit_quality' : None,          # 0..1
-    'tic_offset' : None,
-    'nearest_tics' : None,             # nearest TICs to prf centroid Table.    
+    'tic_offset' : None,                # tic offset to prf centroid (arcsec)
+    'nearest_tics' : None,           # nearest TICs to prf centroid Table.    
     'img_diff' : None,                 #difference image
     'img_oot' : None,                  #out of transit image
-    'img_intr' : None                  #in transit image
+    'img_intr' : None,                 #in transit image
+    'img_prf' : None                   # prf image
 }
 
 def centroid_vetting(tpf, epochs, tot_transit_dur, plot=True, **kwargs):
     #, oot_outer_margin, oot_inner_margin, pixel_mask=None, plot=True):
     #epochs: float or list of floats
     if isinstance(epochs, float): epochs = [epochs]
+    plot_flux_centroid = kwargs.get('plot_flux_centroid', False)
+    res['ticid'] = tpf.get_header()['TICID']
+    res['sector'] = tpf.get_header()['SECTOR']
+    res['transit_duration'] = tot_transit_dur
     #    
     img_diff, img_intr, img_oot = _get_in_out_diff_img(tpf, epochs, tot_transit_dur, **kwargs)
     #
@@ -263,8 +272,8 @@ def centroid_vetting(tpf, epochs, tot_transit_dur, plot=True, **kwargs):
     x02 = np.array([ra0, ra0])
     y02 = np.array([dec0-10.5, dec0+10.5])
     axes[2].plot(x01, y01, x02, y02, c='green', lw=0.8)
-    #axes[2].scatter(fluxCentroid_X,fluxCentroid_Y, marker = '+', s=400,lw=0.6,c='k')
-    axes[2].scatter(ra1,dec1, marker = '+', s=200,lw=0.6,c='k')
+    if plot_flux_centroid:
+        axes[2].scatter(ra1,dec1, marker = '+', s=200,lw=0.6,c='blue')
     coord_fc = tpf.wcs.pixel_to_world(fluxCentroid_X, fluxCentroid_Y)
     ra_fc, dec_fc = _get_offset(tic_coords,coord_fc)        
     #circle around centroid cross, radius in pixels = 10.5 (TESS_pixel/2)
@@ -368,10 +377,7 @@ def _get_in_out_diff_img(tpf, epochs, tot_transit_dur, **kwargs):
     mask = False
     pixel_mask = kwargs.get('pixel_mask', None)
     if pixel_mask is not None and pixel_mask.any(): mask = True
-    tpf_list = [tpf.flux.value]
-    t_list = [tpf.time.value]
     if isinstance(epochs, float): epochs = [epochs]
-    T0_list = epochs
     if tot_transit_dur == 0:
         tot_transit_dur = 0.3
     full_transit_dur = kwargs.get('full_transit_dur', tot_transit_dur * 0.8)    
@@ -381,29 +387,30 @@ def _get_in_out_diff_img(tpf, epochs, tot_transit_dur, **kwargs):
     oot_outer_margin = kwargs.get('oot_outer_margin', oot_inner_margin + tot_transit_dur)
     # loop through all of the list of PCA corrected flux vs time arrays for each marked transit-event
     imgs_intr = []; imgs_oot = []
-    for idx, tpf_filt in enumerate(tpf_list): # idx is for each marked transit-event
-        t = t_list[idx] # the time array
-        intransit = 0; ootransit = 0
-        for T0 in epochs:
-            intr = abs(T0 - t) < transit_full_half  # mask of in transit times
-            oot = (abs(T0 - t) < oot_outer_margin) * (abs(T0 - t) > oot_inner_margin)  # mask of out transit times
-            intransit = intransit + len(intr[intr==True])
-            ootransit = ootransit + len(oot[oot==True])
-            img_intr = np.nanmean(tpf_filt[intr,:,:], axis=0)
-            if mask: img_intr[pixel_mask] = np.nan
-            img_oot = np.nanmean(tpf_filt[oot, :, :], axis=0)
-            if mask: img_oot[pixel_mask] = np.nan
-            imgs_intr.append(img_intr) 
-            imgs_oot.append(img_oot)
-        img_intr = np.nanmean(imgs_intr, axis=0)
-        img_oot = np.nanmean(imgs_oot, axis=0)
-        #img_diff = np.abs(img_oot - img_intr)  # calculate the difference image (out of transit minus in-transit)
-        img_diff = img_oot - img_intr
-        res['inTransit_cadences'] = intransit
-        res['ooTransit_cadences'] = ootransit
-        res['inTransit_margin'] = transit_full_half
-        res['ooTransit_inner_margin'] = oot_inner_margin
-        res['ooTransit_outer_margin'] = oot_outer_margin
+    t = tpf.time.value
+    flux = tpf.flux.value
+    intransit = 0; ootransit = 0
+    for T0 in epochs:
+        intr = abs(T0 - t) < transit_full_half  # mask of in transit times
+        oot = (abs(T0 - t) < oot_outer_margin) * (abs(T0 - t) > oot_inner_margin)  # mask of out transit times
+        intransit = intransit + len(intr[intr==True])
+        ootransit = ootransit + len(oot[oot==True])
+        img_intr = np.nanmean(flux[intr,:,:], axis=0)
+        if mask: img_intr[pixel_mask] = np.nan
+        img_oot = np.nanmean(flux[oot, :, :], axis=0)
+        if mask: img_oot[pixel_mask] = np.nan
+        imgs_intr.append(img_intr) 
+        imgs_oot.append(img_oot)
+    img_intr = np.nanmean(imgs_intr, axis=0)
+    img_oot = np.nanmean(imgs_oot, axis=0)
+    #img_diff = np.abs(img_oot - img_intr)  # calculate the difference image (out of transit minus in-transit)
+    img_diff = img_oot - img_intr
+    res['inTransit_cadences'] = intransit
+    res['ooTransit_cadences'] = ootransit
+    res['inTransit_margin'] = transit_full_half
+    res['ooTransit_inner_margin'] = oot_inner_margin
+    res['ooTransit_outer_margin'] = oot_outer_margin
+    res['valid_transit_epochs'] = epochs  # TO DO - discard transits near gaps and momentum dumps
     return img_diff, img_intr, img_oot
 
 def _get_offset(coord1,coord2):
