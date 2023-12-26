@@ -15,45 +15,24 @@ from astropy.table import Table
 from scipy.optimize import minimize
 import matplotlib.ticker as ticker
 import tessprfmodel as prfmodel
+from ipywidgets import interact,fixed, Label, HBox
+import ipywidgets as widgets
 
-#global dictionary for returned results
-res = {
-    'ticid' : None,
-    'sector': None,
-    'valid_transit_epochs': None,  # (list)   #     
-    'transit_duration' : None,            # in days
-    'inTransit_cadences' : None,       # no. of cadences in In Transir Image
-    'ooTransit_cadences' : None,       # no. of cadences in Out Of Transir Image
-    'inTransit_margin' : None,         # In Transit windows (epochs-inTransit_margin <-> epochs+inTransit_margin)
-    'ooTransit_inner_margin' : None,   # Out of Transit wibdows:
-    'ooTransit_outer_margin' : None,   #  (epochs +/- inner -~<->to epochs +/- outer)
-    'tic_pos' : None,                      # relative tic position to (0,0)
-    'flux_centroid_pos' : None,        #relative flux centroid position to (0,0)
-    'prf_centroid_pos' : None,         #relative prf centroid position to (0,0)
-    'prf_fit_quality' : None,          # 0..1
-    'tic_offset' : None,                # tic offset to prf centroid (arcsec)
-    'nearest_tics' : None,           # nearest TICs to prf centroid Table.    
-    'img_diff' : None,                 #difference image
-    'img_oot' : None,                  #out of transit image
-    'img_intr' : None,                 #in transit image
-    'img_prf' : None                   # prf image
-}
-
-def centroid_vetting(tpf, epochs, tot_transit_dur, plot=True, **kwargs):
+def centroid_vetting(tpf, epochs, transit_dur, plot=True, **kwargs):
     #, oot_outer_margin, oot_inner_margin, pixel_mask=None, plot=True):
     #epochs: float or list of floats
     if isinstance(epochs, float): epochs = [epochs]
     plot_flux_centroid = kwargs.get('plot_flux_centroid', False)
-    res['ticid'] = tpf.get_header()['TICID']
-    res['sector'] = tpf.get_header()['SECTOR']
-    res['transit_duration'] = tot_transit_dur
-    #    
-    img_diff, img_intr, img_oot = _get_in_out_diff_img(tpf, epochs, tot_transit_dur, **kwargs)
+    ticid = tpf.get_header()['TICID']
+    sector = tpf.get_header()['SECTOR']
     #
-    res['img_diff'] = img_diff
-    res['img_oot'] = img_oot
-    res['img_intr'] = img_intr
-    ntransits = len(epochs)
+    validEpochs, inTMargin, ooTInnerM, ooTOuterM, inTransitCad, ooTransitCad = _check_epochs(tpf, epochs, transit_dur, **kwargs)   
+    #
+    pixel_mask = kwargs.get('pixel_mask', None) 
+    #    
+    img_diff, img_intr, img_oot = _get_in_out_diff_img(tpf, validEpochs, inTMargin, ooTInnerM, ooTOuterM, pixel_mask)
+    #
+    ntransits = len(validEpochs)
     TIC_ID = tpf.get_header()['TICID']
     TIC2str = tpf.get_header()['OBJECT']
     sector = tpf.get_header()['SECTOR']
@@ -67,8 +46,9 @@ def centroid_vetting(tpf, epochs, tot_transit_dur, plot=True, **kwargs):
     circular_mask[max(yy-1,0):min(yy+2,shapeY+1), max(xx-2,0):min(xx+3,shapeX+1)] = True        
     fluxCentroid_X, fluxCentroid_Y = lk.utils.centroid_quadratic(img_diff, mask=circular_mask)
     # 
-    res['flux_centroid_pos'] = (fluxCentroid_X, fluxCentroid_Y)
-    #print
+    flux_centroid_pos = (fluxCentroid_X, fluxCentroid_Y)
+    #
+    
     radSearch = 1 / 10 # radius in degrees
     medx = tpf.shape[1:][1]/2
     medy = tpf.shape[1:][0]/2
@@ -101,9 +81,17 @@ def centroid_vetting(tpf, epochs, tot_transit_dur, plot=True, **kwargs):
     #
     prfCentroid_X, prfCentroid_Y, prfFitQuality, img_prf= _get_PRF_centroid(tpf, img_diff, fluxCentroid_X, fluxCentroid_Y)
     #
-    res['prf_centroid_pos'] = (prfCentroid_X, prfCentroid_Y)
-    res['prf_fit_quality'] = prfFitQuality
-    res['img_prf'] = img_prf
+    prfError = False
+    if not((round(prfCentroid_X) in range(shapeX)) and (round(prfCentroid_X) in range(shapeX))): 
+        #if (circular_mask[round(prfCentroid_Y), round(prfCentroid_X)]):
+        prfError = True
+        print('Error in PRF centroid', prfCentroid_X, prfCentroid_Y)
+        print('prfFitQuality=', prfFitQuality)
+        prfCentroid_X, prfCentroid_Y = fluxCentroid_X, fluxCentroid_Y
+        plot_flux_centroid = False
+        
+    prf_centroid_pos = (prfCentroid_X, prfCentroid_Y)
+    
     coord_d = tpf.wcs.pixel_to_world(prfCentroid_X, prfCentroid_Y)
     #end prf
     attempts = 0
@@ -149,10 +137,8 @@ def centroid_vetting(tpf, epochs, tot_transit_dur, plot=True, **kwargs):
     
     tx, ty = tpf.wcs.world_to_pixel(tic_coords)
     tic_pos = (tx.item(0), ty.item(0))
-    res['tic_pos'] = tic_pos
     tic_offset = catalogData[catalogData['ID'] == str(TIC_ID)]['dstArcSec'][0]
-    res['tic_offset'] = tic_offset
-    res['nearest_tics'] = TcatData = catalogData[:20]['ID','ra','dec','Tmag','dstArcSec','has_pm','ra_no_pm','dec_no_pm','dstArcSec_no_pm']
+    nearest_tics = catalogData[:20]['ID','ra','dec','Tmag','dstArcSec','has_pm','ra_no_pm','dec_no_pm','dstArcSec_no_pm']
     
     nstars = 9  # maximum number of TICs to show in table
     
@@ -194,7 +180,7 @@ def centroid_vetting(tpf, epochs, tot_transit_dur, plot=True, **kwargs):
     cols=4
     fig, axes = plt.subplots(1, cols, figsize=(12.5, 4.5),subplot_kw=dict(box_aspect=1)) #,constrained_layout = True)
     axes[0].imshow(img_oot, cmap=plt.cm.viridis, origin = 'lower',aspect='auto')
-    axes[0].set_title("Mean Out of Transit Flux".format(tot_transit_dur), fontsize = 11 )
+    axes[0].set_title("Mean Out of Transit Flux".format(transit_dur), fontsize = 11 )
     #display pipeline mask
     points = [[None for j in range(tpf.pipeline_mask.shape[0])] for i in range(tpf.pipeline_mask.shape[1])]
     for x in range(tpf.pipeline_mask.shape[0]):
@@ -261,7 +247,7 @@ def centroid_vetting(tpf, epochs, tot_transit_dur, plot=True, **kwargs):
     axes[1].set_yticks(np.arange(len(y_list)))
     axes[1].set_yticklabels(y_list)
     axes[1].tick_params(axis='x', labelrotation=90)
-    axes[1].set_title("Difference Image\nMean Out-In Transit Flux".format(tot_transit_dur), fontsize = 11 )
+    axes[1].set_title("Difference Image\nMean Out-In Transit Flux".format(transit_dur), fontsize = 11 )
 
     axes[2].grid(lw=0.2)
     axes[2].tick_params(axis='both', which='major', labelsize=9)
@@ -276,14 +262,13 @@ def centroid_vetting(tpf, epochs, tot_transit_dur, plot=True, **kwargs):
         axes[2].scatter(ra1,dec1, marker = '+', s=200,lw=0.6,c='blue')
     coord_fc = tpf.wcs.pixel_to_world(fluxCentroid_X, fluxCentroid_Y)
     ra_fc, dec_fc = _get_offset(tic_coords,coord_fc)        
-    #circle around centroid cross, radius in pixels = 10.5 (TESS_pixel/2)
-    #circle2 = plt.Circle((ra_fc, dec_fc), 10.5, color='grey', clip_on=False,fill=False, lw=0.3)
-    #axes[2].add_patch(circle2)
     
     axes[2].scatter(ra,dec, marker = '*', c='blue')
     axes[2].scatter(0,0, marker = '*', c='red')
-    axes[2].set_title("Difference Image PRF Centroid\nPRF fit Quality = "+str(round(prfFitQuality,3)), fontsize = 11 )
-    
+    if prfError:
+        axes[2].set_title("Difference Image Flux Centroid\n(Error in PRF centroid)", fontsize = 11 )
+    else:
+        axes[2].set_title("Difference Image PRF Centroid\nPRF fit Quality = "+str(round(prfFitQuality,3)), fontsize = 11 )
     xmin, xmax = axes[2].get_xlim()
     ymin, ymax = axes[2].get_ylim()
     tam1 = abs(xmax-xmin)
@@ -301,12 +286,13 @@ def centroid_vetting(tpf, epochs, tot_transit_dur, plot=True, **kwargs):
         if cat[i] == str(TIC_ID):
             scolor = 'red'
         z =z + 1
-        axes[2].text(ra[i]+tam1/35,dec[i], z, fontsize=9, c=scolor, zorder=2)
+        axes[2].text(ra[i]-tam1/34,dec[i], z, fontsize=9, c=scolor, zorder=2)
         
     axes[2].set_xlabel("RA Offset (arcsec)", fontsize=10,labelpad=2)
     axes[2].set_ylabel("Dec Offset (arcsec)", fontsize=10,labelpad=0)
     axes[2].set_xlim([xmin, xmax])
     axes[2].set_ylim([ymin, ymax])
+    axes[2].invert_xaxis()
     z = 0
     axes[3].axis('off')
     axes[3].set_xlim([0, 1])
@@ -350,51 +336,45 @@ def centroid_vetting(tpf, epochs, tot_transit_dur, plot=True, **kwargs):
 
     plt.gcf().subplots_adjust(bottom=0.25, top=0.95, left=0.05,right=0.95,wspace=0.26)
 
-    if len(epochs) < 6:
-        epochs3 = epochs.copy()
+    if len(validEpochs) < 6:
+        epochs3 = validEpochs.copy()
         for i,t in enumerate(epochs3):
             epochs3[i] = round(t,3)
-        fig.suptitle(TIC2str+' Sector ' +str(sector)+'            Transit epochs (BTJD)= '+str(epochs3)+'            Transit duration (hours)= '+ f'{tot_transit_dur*24:2.3f}',
+        fig.suptitle(TIC2str+' Sector ' +str(sector)+'            Transit epochs (BTJD)= '+str(epochs3)+'            Transit duration (hours)= '+ f'{transit_dur*24:2.3f}',
                      fontsize=12, x=0.49, y=1.04)
     else:
-        fig.suptitle(TIC2str+' Sector ' +str(sector)+'            Total transits = '+str(ntransits)+'            Transit duration (hours)= '+ f'{tot_transit_dur*24:2.3f}',
+        fig.suptitle(TIC2str+' Sector ' +str(sector)+'            Total transits = '+str(ntransits)+'            Transit duration (hours)= '+ f'{transit_dur*24:2.3f}',
                      fontsize=12, x=0.49, y=1.04)
-        
-    com_xlabel = "In Transit cadences: " + str(res['inTransit_cadences'])+"  (Epoch ± "+f'{res["inTransit_margin"]:2.3f}d)   '
-    com_xlabel += "         Out Of Transit cadences: "+str(res['ooTransit_cadences'])+"  (Epoch ± "+f'{res["ooTransit_inner_margin"]:2.3f}d' 
-    com_xlabel += "  to  Epoch ± "+ f'{res["ooTransit_outer_margin"]:2.3f}d)'
+    com_xlabel = "In Transit cadences: " + str(inTransitCad)+"  (Epoch ± "+f'{inTMargin:2.3f}d)   '
+    com_xlabel += "         Out Of Transit cadences: "+str(ooTransitCad)+"  (Epoch ± "+f'{ooTInnerM:2.3f}d' 
+    com_xlabel += "  to  Epoch ± "+ f'{ooTOuterM:2.3f}d)'
     fig.text(0.5, 0.97, com_xlabel, ha='center', fontsize = 10)    
     plt.show()
-    return res
+    
+    if prfError:
+        flux_centroid_pos = prf_centroid_pos
+        prf_centroid_pos = None
+        prfFitQuality = None
+        img_prf = None
+    return _get_results(ticid, sector, validEpochs, transit_dur, inTransitCad, ooTransitCad, inTMargin, ooTInnerM,
+                                ooTOuterM, tic_pos, flux_centroid_pos, prf_centroid_pos, prfFitQuality, tic_offset, nearest_tics,img_diff, 
+                                img_oot, img_intr, img_prf)
 
-# Difference Image calculation - Adapted from :
+                                # Difference Image calculation - Adapted from :
 #     @noraeisner - Planet Hunters Coffee Chat - False Positives - In and Out of Flux Comparison 
 # https://github.com/noraeisner/PH_Coffee_Chat/blob/main/False%20Positive/False%20positives%20-%20(2)%20in%20out%20transit%20flux.ipynb
 #============================================================================================================
-def _get_in_out_diff_img(tpf, epochs, tot_transit_dur, **kwargs): 
+def _get_in_out_diff_img(tpf, epochs, inTMargin, ooTInnerM, ooTOuterM, pixel_mask): 
     #full_transit_dur, oot_outer_margin, oot_inner_margin, pixel_mask=None):
     #epochs: float or list of floats - If more than one, a mean image of all transits is calculated
     mask = False
-    pixel_mask = kwargs.get('pixel_mask', None)
     if pixel_mask is not None and pixel_mask.any(): mask = True
-    if isinstance(epochs, float): epochs = [epochs]
-    if tot_transit_dur == 0:
-        tot_transit_dur = 0.3
-    full_transit_dur = kwargs.get('full_transit_dur', tot_transit_dur * 0.8)    
-    transit_tot_half = round(tot_transit_dur/2, 3)
-    transit_full_half = round(full_transit_dur/2, 3)
-    oot_inner_margin = kwargs.get('oot_inner_margin', round(transit_tot_half * 1.5, 3))
-    oot_outer_margin = kwargs.get('oot_outer_margin', oot_inner_margin + tot_transit_dur)
-    # loop through all of the list of PCA corrected flux vs time arrays for each marked transit-event
     imgs_intr = []; imgs_oot = []
-    t = tpf.time.value
+    times = tpf.time.value
     flux = tpf.flux.value
-    intransit = 0; ootransit = 0
     for T0 in epochs:
-        intr = abs(T0 - t) < transit_full_half  # mask of in transit times
-        oot = (abs(T0 - t) < oot_outer_margin) * (abs(T0 - t) > oot_inner_margin)  # mask of out transit times
-        intransit = intransit + len(intr[intr==True])
-        ootransit = ootransit + len(oot[oot==True])
+        intr = abs(T0 - times) < inTMargin  # mask of in transit times
+        oot = (abs(T0 - times) < ooTOuterM) * (abs(T0 - times) > ooTInnerM)  # mask of out transit times
         img_intr = np.nanmean(flux[intr,:,:], axis=0)
         if mask: img_intr[pixel_mask] = np.nan
         img_oot = np.nanmean(flux[oot, :, :], axis=0)
@@ -403,15 +383,53 @@ def _get_in_out_diff_img(tpf, epochs, tot_transit_dur, **kwargs):
         imgs_oot.append(img_oot)
     img_intr = np.nanmean(imgs_intr, axis=0)
     img_oot = np.nanmean(imgs_oot, axis=0)
-    #img_diff = np.abs(img_oot - img_intr)  # calculate the difference image (out of transit minus in-transit)
     img_diff = img_oot - img_intr
-    res['inTransit_cadences'] = intransit
-    res['ooTransit_cadences'] = ootransit
-    res['inTransit_margin'] = transit_full_half
-    res['ooTransit_inner_margin'] = oot_inner_margin
-    res['ooTransit_outer_margin'] = oot_outer_margin
-    res['valid_transit_epochs'] = epochs  # TO DO - discard transits near gaps and momentum dumps
     return img_diff, img_intr, img_oot
+
+def _check_epochs(tpf, epochs, transit_dur, **kwargs):
+    inTMargin, ooTInner, ooTOuter = _get_margins(transit_dur, **kwargs)
+    validEpochs = []
+    inTransitCad = 0
+    ooTransitCad = 0
+    tv = tpf.time.value
+    for T0 in epochs:
+        t = tv[abs(T0-tv)<ooTOuter]
+        diff = np.diff(t)
+        if np.max(diff) < np.min(diff)*10:
+            validEpochs.append(T0)
+            inTransitCad += len(t[abs(T0 - t) < inTMargin])
+            ooTransitCad += len(t[(abs(T0-t) < ooTOuter) * (abs(T0-t) > ooTInner)])
+    return validEpochs, inTMargin, ooTInner, ooTOuter, inTransitCad, ooTransitCad
+ 
+def _get_margins(transit_dur, **kwargs):
+    inTMargin = kwargs.get('intransit_margin', round(transit_dur * 0.4,3))
+    ooTInner = kwargs.get('ootransit_inner', round(transit_dur * 0.75, 3))
+    ooTOuter = kwargs.get('ootransit_outer', ooTInner + transit_dur) 
+    return inTMargin, ooTInner, ooTOuter
+
+def _get_results(*args):
+    return dict(zip(
+                (
+                    'ticid' ,
+                    'sector',
+                    'valid_transit_epochs',     # (list)   #     
+                    'transit_duration' ,          # in days
+                    'inTransit_cadences' ,      # no. of cadences in In Transir Image
+                    'ooTransit_cadences' ,     # no. of cadences in Out Of Transir Image
+                    'inTransit_margin' ,          # In Transit windows (epochs-inTransit_margin <-> epochs+inTransit_margin)
+                    'ooTransit_inner_margin' , # Out of Transit wibdows:
+                    'ooTransit_outer_margin' , #  (epochs +/- inner -~<->to epochs +/- outer)
+                    'tic_pos' ,                       # relative tic position to (0,0)
+                    'flux_centroid_pos' ,         #relative flux centroid position to (0,0)
+                    'prf_centroid_pos' ,          #relative prf centroid position to (0,0)
+                    'prf_fit_quality' ,              # 0..1
+                    'tic_offset' ,                   # tic offset to prf centroid (arcsec)
+                    'nearest_tics' ,               # nearest TICs to prf centroid Table.    
+                    'img_diff' ,                     #difference image
+                    'img_oot' ,                     #out of transit image
+                    'img_intr' ,                     #in transit image
+                    'img_prf'                       # prf image
+                ), args))
 
 def _get_offset(coord1,coord2):
     ra_offset = (coord2.ra - coord1.ra) * np.cos(coord1.dec.to('radian'))
@@ -460,7 +478,6 @@ def _get_PRF_centroid(tpf, img_diff, flux_centroid_x, flux_centroid_y):
                              ccd = tpf.ccd,
                              column = extent[0],
                              row = extent[2])
-    sector = tpf.sector
     fluxcentroid = (tpf.column + flux_centroid_x, tpf.row + flux_centroid_y)
     #
     fitVector, prfFitQuality, simData = _tess_PRF_centroid(prf, img_diff, fluxcentroid) 
@@ -482,3 +499,47 @@ def _render_prf(prf, coef):
     # coef = [x, y, a, o]
     return coef[3] + coef[2]*prf.evaluate(coef[0] + 0.5, coef[1] + 0.5)
 # end =============================================================================
+# ---- additional lightcurve plots to help visualization of the time span measured ----
+#--------------- Sam Lee - https://github.com/orionlee    -----------------------------
+#--------------------------------------------------------------------------------------
+
+def show_transit_margins(tpf, epoch, transit_dur, interact=False, **kwargs):
+    #def iPlot(inT, ooTI, ooTO, T0):
+    #   plot(inT.value, ooTI.value, ooTO.value, T0)
+    #   return inT, ooTO, ooTI
+    def plot(inT, ooTI, ooTO, T0):
+        ax = plt.figure(figsize=(8, 4.5)).gca()
+        ax = lc.scatter(ax=ax, s=20, c='k')
+        #xmin, xmax = ax.get_xlim()
+        ax.axvline(T0, color="red", ymax=0.15, linewidth=1, linestyle="--", label="epoch")
+        ax.axvspan(T0 - inT, T0 + inT, facecolor="red", alpha=0.3, label="In Transit")
+        ax.axvspan(T0 - ooTO, T0 - ooTI, facecolor="green", alpha=0.3, label="Out of Transit")
+        ax.axvspan(T0 + ooTI, T0 + ooTO, facecolor="green", alpha=0.3)
+        ax.set_xticks([T0 - ooTO, T0 - ooTI,T0 - inT, T0, T0 + inT, T0 + ooTI, T0 + ooTO])
+        ax.set_xticklabels(['-%.3f' % ooTO,'-%.3f' % ooTI,'\n-%.3f' % inT,
+                      '%.3f' % T0, '\n+%.3f' % inT, '+%.3f' % ooTI, '+%.3f' % ooTO])    
+        ax.legend(loc="lower right", fontsize=8)
+        for item in (ax.get_xticklabels() + ax.get_yticklabels()):
+            item.set_fontsize(10)
+        return
+        
+    if isinstance(epoch, float): epoch = [epoch]
+    inTransitM, innerM, outerM = _get_margins(transit_dur, **kwargs)
+    lc_target = tpf.to_lightcurve().remove_nans()
+    T0 = epoch[0]
+    lc = lc_target.truncate(T0 - outerM * 1.25, T0 + outerM * 1.25)
+    if interact == False:
+        plot(inTransitM, innerM, outerM, T0)
+        return
+    xmax = T0 + outerM * 1.25
+    inT = widgets.FloatSlider(value=inTransitM, min=0.01, max=innerM, step=0.002,disabled=False,readout_format='.3f')
+    ooTI = widgets.FloatSlider(value=innerM, min=inTransitM, max=outerM, step=0.002, disabled=False,readout_format='.3f')
+    ooTO = widgets.FloatSlider(value=outerM, min=innerM, max=xmax-T0-0.01, step=0.002, disabled=False,readout_format='.3f')
+    BinT = HBox([Label('InTransit Margin'), inT])
+    BooTI = HBox([Label('ooT Inner Margin'), ooTI])
+    BooTO = HBox([Label('ooT Outer Margin'), ooTO])
+    box_layout = widgets.Layout(display='flex', flex_flow='column', align_items='center', width='570px')
+    ui = widgets.VBox([BinT, BooTI, BooTO], layout=box_layout)
+    out = widgets.interactive_output(plot, {'inT': inT, 'ooTI': ooTI, 'ooTO': ooTO, 'T0':fixed(T0)})
+    display(out,ui)
+    return inT, ooTI, ooTO
