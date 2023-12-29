@@ -1,0 +1,19 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+
+# ipython notebooks
+.ipynb_checkpoints
+
+# Mac OSX
+.DS_Store
+
+# PyCharm
+.idea
+
+# VIM
+.*.swp
+.*.swo
+
+# Visual Studio Code
+.vscode
+*.code-workspace
