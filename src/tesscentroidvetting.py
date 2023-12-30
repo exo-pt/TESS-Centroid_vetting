@@ -19,7 +19,6 @@ from ipywidgets import interact,fixed, Label, HBox
 import ipywidgets as widgets
 
 def centroid_vetting(tpf, epochs, transit_dur, plot=True, **kwargs):
-    #, oot_outer_margin, oot_inner_margin, pixel_mask=None, plot=True):
     #epochs: float or list of floats
     if isinstance(epochs, float): epochs = [epochs]
     plot_flux_centroid = kwargs.get('plot_flux_centroid', False)
@@ -28,10 +27,7 @@ def centroid_vetting(tpf, epochs, transit_dur, plot=True, **kwargs):
     sector = tpf.get_header()['SECTOR']
     #
     validEpochs, inTMargin, ooTInnerM, ooTOuterM, inTransitCad, ooTransitCad = _check_epochs(tpf, epochs, transit_dur, **kwargs)   
-    #
-    pixel_mask = kwargs.get('pixel_mask', None) 
-    #    
-    img_diff, img_intr, img_oot = _get_in_out_diff_img(tpf, validEpochs, inTMargin, ooTInnerM, ooTOuterM, pixel_mask)
+    img_diff, img_intr, img_oot = _get_in_out_diff_img(tpf, validEpochs, inTMargin, ooTInnerM, ooTOuterM)
     #
     ntransits = len(validEpochs)
     TIC_ID = tpf.get_header()['TICID']
@@ -380,11 +376,9 @@ def centroid_vetting(tpf, epochs, transit_dur, plot=True, **kwargs):
 #     @noraeisner - Planet Hunters Coffee Chat - False Positives - In and Out of Flux Comparison 
 # https://github.com/noraeisner/PH_Coffee_Chat/blob/main/False%20Positive/False%20positives%20-%20(2)%20in%20out%20transit%20flux.ipynb
 #============================================================================================================
-def _get_in_out_diff_img(tpf, epochs, inTMargin, ooTInnerM, ooTOuterM, pixel_mask): 
-    #full_transit_dur, oot_outer_margin, oot_inner_margin, pixel_mask=None):
+def _get_in_out_diff_img(tpf, epochs, inTMargin, ooTInnerM, ooTOuterM): 
+    #full_transit_dur, oot_outer_margin, oot_inner_margin):
     #epochs: float or list of floats - If more than one, a mean image of all transits is calculated
-    mask = False
-    if pixel_mask is not None and pixel_mask.any(): mask = True
     imgs_intr = []; imgs_oot = []
     times = tpf.time.value
     flux = tpf.flux.value
@@ -392,9 +386,7 @@ def _get_in_out_diff_img(tpf, epochs, inTMargin, ooTInnerM, ooTOuterM, pixel_mas
         intr = abs(T0 - times) < inTMargin  # mask of in transit times
         oot = (abs(T0 - times) < ooTOuterM) * (abs(T0 - times) > ooTInnerM)  # mask of out transit times
         img_intr = np.nanmean(flux[intr,:,:], axis=0)
-        if mask: img_intr[pixel_mask] = np.nan
         img_oot = np.nanmean(flux[oot, :, :], axis=0)
-        if mask: img_oot[pixel_mask] = np.nan
         imgs_intr.append(img_intr) 
         imgs_oot.append(img_oot)
     img_intr = np.nanmean(imgs_intr, axis=0)
