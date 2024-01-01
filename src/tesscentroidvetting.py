@@ -44,7 +44,7 @@ def centroid_vetting(tpf, epochs, transit_dur, plot=True, **kwargs):
         if mask_edges:
             fluxCentroid_X, fluxCentroid_Y, img_diff, points_mask = _mask_edges(img_diff)       
         else:
-            warnings.warn("\nBrightest pixel on edge. Flux centroid couldn't be calculated. Use mask_edges=True if suitable.",  stacklevel=1)
+            warnings.warn("\nBrightest pixel on edge. Flux centroid couldn't be calculated. Use mask_edges=True if suitable.",  stacklevel=2)
             plot_flux_centroid = False
             fluxCentroid_X, fluxCentroid_Y = xx, yy  #return brightest pixel in edge  
     else:
@@ -93,7 +93,7 @@ def centroid_vetting(tpf, epochs, transit_dur, plot=True, **kwargs):
     if not((round(prfCentroid_X) in range(shapeX)) and (round(prfCentroid_X) in range(shapeX))): 
         #if (circular_mask[round(prfCentroid_Y), round(prfCentroid_X)]):
         prfError = True
-        warnings.warn("Error calculating PRF centroid. Returned Flux Centroid instead.")
+        warnings.warn("\nError calculating PRF centroid. Returned Flux Centroid instead.", stacklevel=2)
         prfCentroid_X, prfCentroid_Y = fluxCentroid_X, fluxCentroid_Y
         plot_flux_centroid = False
         
@@ -456,9 +456,9 @@ def _mask_edges(img):
                         xy=(j - 0.5, i - 0.5),
                         width=1,
                         height=1,
-                        color='gold',
+                        color='coral',
                         fill=False,
-                        hatch="//",
+                        hatch="///",
                     )
     return xx, yy, img, points
     #ax.add_patch(points[i][j])    
