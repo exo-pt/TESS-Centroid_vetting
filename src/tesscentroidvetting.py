@@ -372,7 +372,7 @@ def centroid_vetting(tpf, epochs, transit_dur, plot=True, **kwargs):
                                 ooTOuterM, tic_pos, flux_centroid_pos, prf_centroid_pos, prfFitQuality, tic_offset, nearest_tics,img_diff, 
                                 img_oot, img_intr, img_prf)
 
-                                # Difference Image calculation - Adapted from :
+# Difference Image calculation - Adapted from :
 #     @noraeisner - Planet Hunters Coffee Chat - False Positives - In and Out of Flux Comparison 
 # https://github.com/noraeisner/PH_Coffee_Chat/blob/main/False%20Positive/False%20positives%20-%20(2)%20in%20out%20transit%20flux.ipynb
 #============================================================================================================
@@ -431,8 +431,8 @@ def _get_results(*args):
                     'flux_centroid_pos' ,         #relative flux centroid position to (0,0)
                     'prf_centroid_pos' ,          #relative prf centroid position to (0,0)
                     'prf_fit_quality' ,              # 0..1
-                    'tic_offset' ,                   # tic offset to prf centroid (arcsec)
-                    'nearest_tics' ,               # nearest TICs to prf centroid Table.    
+                    'tic_offset' ,                   # tic offset to centroid (arcsec)
+                    'nearest_tics' ,               # nearest TICs to centroid Table.    
                     'img_diff' ,                     #difference image
                     'img_oot' ,                     #out of transit image
                     'img_intr' ,                     #in transit image
