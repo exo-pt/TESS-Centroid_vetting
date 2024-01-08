@@ -1,6 +1,6 @@
 #
 #numpy, matplotlib, lightkurve, astroquery, astropy, scipy
-import warnings
+import sys, warnings
 import numpy as np
 from numpy import ones, array
 import matplotlib.pyplot as plt
@@ -15,26 +15,49 @@ from astropy.table import Table
 from scipy.optimize import minimize
 import matplotlib.ticker as ticker
 import tessprfmodel as prfmodel
-from ipywidgets import interact,fixed, Label, HBox
-import ipywidgets as widgets
 
-def centroid_vetting(tpf, epochs, transit_dur, plot=True, **kwargs):
-    #epochs: float or list of floats
+
+def centroid_vetting(tpf, epochs, transit_dur, intransit_margin=0, ootransit_inner=0, ootransit_outer=0,
+                                plot=True, plot_flux_centroid=False, mask_edges= False):
+    '''
+    Minimum Parameters:,
+            tpf                     [Tess TargetPixelFile]
+            epochs               [list] or [float] of transit time(s) to analyse
+            transit_dur          [float] Transit duration in days
+
+    Optional parameters: 
+            intransit_margin    Margin in days around transit time(s) 
+                                     [float]  default = transit_dur * 0.4
+            ootransit_inner     Margin in days of out of transit (inner limit)
+                                     [float]  default = transit_dur * 0.75
+            ootransit_outer     Margin in days of out of transit (outer limit)
+                                     [float]  default = oot_inner_margin + transit_dur
+            plot                    Display images 
+                                     [boolean] default = True 
+            plot_flux_centroid  Also plots a small cross for the Flux Centroid)                                     
+                                     [boolean] default = False  
+            mask_edges         Mask pixels at edge if brighter than brightest pixel in central region
+                                     [boolean] default = False (Only can be set if difference image brightest pixel is at edge)
+            
+        In transit times      :  epoch(s) ± intransit_margin
+        Out of transit times:  Between <epoch(s) ± ootransit_outer>  and  <epoch(s) ± ootransit_inner> 
+    '''
     if isinstance(epochs, float): epochs = [epochs]
-    plot_flux_centroid = kwargs.get('plot_flux_centroid', False)
-    mask_edges = kwargs.get('mask_edges', False)
-    ticid = tpf.get_header()['TICID']
-    sector = tpf.get_header()['SECTOR']
     #
-    validEpochs, inTMargin, ooTInnerM, ooTOuterM, inTransitCad, ooTransitCad = _check_epochs(tpf, epochs, transit_dur, **kwargs)   
+    inTMargin, ooTInnerM, ooTOuterM = _get_margins(transit_dur, intransit_margin, ootransit_inner, ootransit_outer)
+    #
+    validEpochs, inTransitCad, ooTransitCad = _check_epochs(tpf, epochs,  inTMargin, ooTInnerM, ooTOuterM)   
+    #
     img_diff, img_intr, img_oot = _get_in_out_diff_img(tpf, validEpochs, inTMargin, ooTInnerM, ooTOuterM)
     #
     ntransits = len(validEpochs)
-    TIC_ID = tpf.get_header()['TICID']
+    warnings.formatwarning = formatwarning
+    
+    ticid = tpf.get_header()['TICID']
     TIC2str = tpf.get_header()['OBJECT']
     sector = tpf.get_header()['SECTOR']
     tpf_mag = tpf.meta.get("TESSMAG") 
-    maglim = max(round(tpf_mag) + 8, 18)
+    maglim = max(round(tpf_mag) + 8, 19)
     shapeX = img_diff.shape[1]
     shapeY = img_diff.shape[0]
     yy, xx = np.unravel_index(img_diff.argmax(), img_diff.shape)
@@ -44,7 +67,7 @@ def centroid_vetting(tpf, epochs, transit_dur, plot=True, **kwargs):
         if mask_edges:
             fluxCentroid_X, fluxCentroid_Y, img_diff, points_mask = _mask_edges(img_diff)       
         else:
-            warnings.warn("\nBrightest pixel on edge. Flux centroid couldn't be calculated. Use mask_edges=True if suitable.",  stacklevel=2)
+            warnings.warn("Brightest pixel on edge. Flux centroid couldn't be calculated. Use mask_edges=True if suitable.")
             plot_flux_centroid = False
             fluxCentroid_X, fluxCentroid_Y = xx, yy  #return brightest pixel in edge  
     else:
@@ -56,58 +79,29 @@ def centroid_vetting(tpf, epochs, transit_dur, plot=True, **kwargs):
     # 
     flux_centroid_pos = (fluxCentroid_X, fluxCentroid_Y)
     #
-    
-    radSearch = 1 / 10 # radius in degrees
-    medx = tpf.shape[1:][1]/2
-    medy = tpf.shape[1:][0]/2
-    coord_center = tpf.wcs.pixel_to_world(medx, medy)
-    pix_scale = 21.0 #Tess
-    radius=Angle(np.min(tpf.shape[1:]) * pix_scale, "arcsec")
-    attempts = 0
-    while attempts < 3:
-        try:
-            catDatatpf = Catalogs.query_region(coordinates=coord_center, radius = radius, catalog = "TIC")
-            break
-        except:
-            attempts += 1
-    #prf 
-    catDatatpf = catDatatpf[catDatatpf['Tmag']<maglim]
-    coord_corr_tpf = _correct_with_proper_motion(
-        np.nan_to_num(np.asarray(catDatatpf['ra'])) * u.deg, 
-        np.nan_to_num(np.asarray(catDatatpf['dec'])) * u.deg,
-        np.nan_to_num(np.asarray(catDatatpf['pmRA'])) * u.milliarcsecond / u.year,
-        np.nan_to_num(np.asarray(catDatatpf['pmDEC'])) * u.milliarcsecond / u.year,    
-        Time('2000', format='byear'), # TIC is in J2000 epoch
-        tpf.time[0] ,  # the observed time for the tpf
-    )
-    catDatatpf['ra_corr'] = coord_corr_tpf.ra.to_value(unit="deg")
-    catDatatpf['dec_corr'] = coord_corr_tpf.dec.to_value(unit="deg")
-    s2_ra = catDatatpf['ra_corr'].value.tolist()
-    s2_dec = catDatatpf['dec_corr'].value.tolist()
-    
-    #at_tic= Table(catDatatpf[catDatatpf['ID'] == str(TIC_ID)][0])
-    #
     prfCentroid_X, prfCentroid_Y, prfFitQuality, img_prf= _get_PRF_centroid(tpf, img_diff, fluxCentroid_X, fluxCentroid_Y)
     #
     prfError = False
     if not((round(prfCentroid_X) in range(shapeX)) and (round(prfCentroid_X) in range(shapeX))): 
-        #if (circular_mask[round(prfCentroid_Y), round(prfCentroid_X)]):
         prfError = True
-        warnings.warn("\nError calculating PRF centroid. Returned Flux Centroid instead.", stacklevel=2)
+        warnings.warn("Error calculating PRF centroid. Returned Flux Centroid instead.")
         prfCentroid_X, prfCentroid_Y = fluxCentroid_X, fluxCentroid_Y
         plot_flux_centroid = False
         
     prf_centroid_pos = (prfCentroid_X, prfCentroid_Y)
     
     coord_d = tpf.wcs.pixel_to_world(prfCentroid_X, prfCentroid_Y)
-    #end prf
+    radSearch = 1 / 10 # radius in degrees
     attempts = 0
     while attempts < 3:
         try:
             catalogData = Catalogs.query_region(coordinates=coord_d, radius = radSearch, catalog = "TIC")
             break
-        except:
+        except Exception as error:
             attempts += 1
+            if attempts > 2:
+                raise
+                
     catalogData = catalogData[catalogData['Tmag'] < maglim]
     # Proper motion correction implementation by Sam Lee (orionlee)
     if 'ra_no_pm' not in catalogData.colnames:
@@ -133,62 +127,57 @@ def centroid_vetting(tpf, epochs, transit_dur, plot=True, **kwargs):
         catalogData.sort(['dstArcSec', 'ID'])
     else:
         warnings.warn("Proper motion correction appears to have been applied to the data. No-Op.")
-    tic_row = catalogData[catalogData['ID'] == str(TIC_ID)][0]
+        
+    tic_row = catalogData[catalogData['ID'] == str(ticid)][0]
     tic_coords = SkyCoord(tic_row['ra']*u.deg, tic_row['dec']*u.deg, frame='icrs')
     coord_d = tpf.wcs.pixel_to_world(prfCentroid_X, prfCentroid_Y)
     ra0, dec0 = _get_offset(tic_coords,coord_d)  
 
     coord_d2 = tpf.wcs.pixel_to_world(fluxCentroid_X, fluxCentroid_Y)
     ra1, dec1 = _get_offset(tic_coords,coord_d2)  
-
     
     tx, ty = tpf.wcs.world_to_pixel(tic_coords)
     tic_pos = (tx.item(0), ty.item(0))
-    tic_offset = catalogData[catalogData['ID'] == str(TIC_ID)]['dstArcSec'][0]
+    tic_offset = catalogData[catalogData['ID'] == str(ticid)]['dstArcSec'][0]
     nearest_tics = catalogData[:20]['ID','ra','dec','Tmag','dstArcSec','has_pm','ra_no_pm','dec_no_pm','dstArcSec_no_pm']
     
+    if not plot:
+        return _get_results(ticid, sector, validEpochs, transit_dur, inTransitCad, ooTransitCad, inTMargin, ooTInnerM, ooTOuterM, 
+                                    tic_pos, flux_centroid_pos, prf_centroid_pos, prfFitQuality, tic_offset, nearest_tics,
+                                    img_diff, img_oot, img_intr, img_prf)
+    #######################################
+    ###########  plot  ####################
+    #######################################
+    #
     nstars = 9  # maximum number of TICs to show in table
-    
+    # catalogData is sorted by distance to centroid
     if len(catalogData) < nstars:
         nstars = len(catalogData)
-    near = [];ra = []; dec = []; has_pm = []; cat = []; tmag = []; sep=[]; s_ra=[]; s_dec=[]; nstar=[]
+        
+    near = [];ra = []; dec = []; has_pm = []; cat = []; tmag = []; sep=[]; s_ra=[]; s_dec=[]
     i_tic = -1
     for i in range(nstars):
         near.append(SkyCoord(catalogData[i]['ra'], catalogData[i]['dec'], frame='icrs', unit='deg'))
+        r, d = _get_offset(tic_coords, near[i])
+        ra.append(r)
+        dec.append(d)   
         cat.append(catalogData[i]['ID'])
         tmag.append(catalogData[i]['Tmag'])
         sep.append(round(catalogData[i]['dstArcSec'],2))
         has_pm.append(catalogData[i]['has_pm'])
-        if cat[i] == str(TIC_ID):
+        if cat[i] == str(ticid):
             i_tic = i
             tic_ra = catalogData[i]['ra']
             tic_dec = catalogData[i]['dec']
         else:
             s_ra.append(catalogData[i]['ra'])
             s_dec.append(catalogData[i]['dec'])
-        nstar.append(i+1)
-    min_r=0;max_r=0;min_d=0;max_d=0
-    nstars_radec = nstars
-    maxsep = max(tic_offset+1, 40)
-    for i in range(nstars):
-        r, d = _get_offset(tic_coords, near[i])
-        min_r=min(min_r,r);max_r=max(max_r,r)
-        min_d=min(min_d,d);max_d=max(max_d,d)
-        if (max_r-min_r>maxsep) or (max_d-min_d>maxsep):
-            nstars_radec = i
-            break
-        ra.append(r)
-        dec.append(d)
-    if not plot:
-        return res
-    #######################################
-    ###########  plot  ####################
-    #######################################
+        
     cols=4
     fig, axes = plt.subplots(1, cols, figsize=(12.5, 4.5),subplot_kw=dict(box_aspect=1)) #,constrained_layout = True)
     axes[0].imshow(img_oot, cmap=plt.cm.viridis, origin = 'lower',aspect='auto')
     axes[0].set_title("Mean Out of Transit Flux".format(transit_dur), fontsize = 11 )
-    #display pipeline mask
+    #display pipeline mask in Out of Transit image
     points = [[None for j in range(tpf.pipeline_mask.shape[0])] for i in range(tpf.pipeline_mask.shape[1])]
     for x in range(tpf.pipeline_mask.shape[0]):
         for y in range(tpf.pipeline_mask.shape[1]):
@@ -202,33 +191,37 @@ def centroid_vetting(tpf, epochs, transit_dur, plot=True, **kwargs):
                                     fill=False)
                 axes[0].add_patch(points[x][y])
     axes[1].imshow(img_diff, cmap=plt.cm.viridis, origin = 'lower',aspect='auto')
-    # prf centroid cross
+    # prf centroid cross in Diff Image
     axes[1].scatter(prfCentroid_X,prfCentroid_Y, marker = '+', s=400,lw=0.6,c='k')
 
+    # Stars 1 to 9 in Diff Image
     coords = SkyCoord(s_ra*u.deg, s_dec*u.deg, frame='icrs')
-    g1,g2=tpf.wcs.world_to_pixel(coords)
-
+    xs , ys =tpf.wcs.world_to_pixel(coords)
     j = 0
     for i in range(nstars):
-        if i != i_tic:
+       if i != i_tic:
             if sep[i] < 25:
-                axes[1].text(g1[j]+0.15, g2[j], nstar[i], fontsize=10, c='black')
+               axes[1].text(xs[j]+0.15, ys[j], i+1, fontsize=10, c='black')
             else:
-                axes[1].text(g1[j]+0.15, g2[j], nstar[i], fontsize=10, c='white')
+                axes[1].text(xs[j]+0.15, ys[j], i+1, fontsize=10, c='white')
             j = j + 1
     
-    # Print TIC stars (code based in TPFPlotter-Gaia stars)
-    coords2 = SkyCoord(s2_ra*u.deg, s2_dec*u.deg, frame='icrs')
+    # Plot all TIC stars in Out of Transit and Diff Images (code based in TPFPlotter-Gaia stars)
+    catDatatpf = _get_tpf_stars_catalog(tpf, maglim)
+    stars_ra = catDatatpf['ra_corr'].value.tolist()
+    stars_dec = catDatatpf['dec_corr'].value.tolist()    
+
+    coords2 = SkyCoord(stars_ra*u.deg, stars_dec*u.deg, frame='icrs')
     g21, g22 = tpf.wcs.world_to_pixel(coords2)    
     sizes = np.array(64.0 / 2**(catDatatpf['Tmag']/5.0))
     j = 0
-    for i in range(len(s2_ra)): 
-        if g21[j] > -0.4 and g21[j] < 10.4:
-            if g22[j] > -0.4 and g22[j] < 10.4:
+    for i in range(len(stars_ra)): 
+        if g21[j] > -0.4 and g21[j] < shapeX - 0.6: #10.4:
+            if g22[j] > -0.4 and g22[j] < shapeY - 0.6: #10.4:
                 size=sizes[i]/100
                 star_color = "white"
                 zorder = 1
-                if catDatatpf[i]['ID'] == str(TIC_ID):
+                if catDatatpf[i]['ID'] == str(ticid):
                     star_color = "red"
                     zorder = 3
                 circle1 = plt.Circle((g21[j], g22[j]),size,color=star_color, zorder = zorder)
@@ -237,6 +230,7 @@ def centroid_vetting(tpf, epochs, transit_dur, plot=True, **kwargs):
                 axes[1].add_patch(circle2)
         j = j + 1   
     # end Print TICs
+
     x_list = []; y_list = []
     for i in range(tpf.shape[1:][0]):
         y_list.append(str(tpf.row+i))
@@ -258,31 +252,43 @@ def centroid_vetting(tpf, epochs, transit_dur, plot=True, **kwargs):
         for i in range(len(points_mask[0])):
             for j in range(len(points_mask[1])):
                 if points_mask[i][j] is not None:
-                    axes[1].add_patch(points_mask[i][j])     
-    axes[1].set_title("Difference Image\nMean Out-In Transit Flux".format(transit_dur), fontsize = 11 )
+                    axes[1].add_patch(points_mask[i][j]) 
+    if mask_edges:
+        axes[1].set_title("Difference Image (edge mask)\nMean Out - In Transit Flux".format(transit_dur), fontsize = 11 )
+    else:
+        axes[1].set_title("Difference Image\nMean Out - In Transit Flux".format(transit_dur), fontsize = 11 )
 
     axes[2].grid(lw=0.2)
     axes[2].tick_params(axis='both', which='major', labelsize=9)
     axes[2].minorticks_on()
-    # centroid cross 
+
+    # prf centroid cross (21px)
     x01 = np.array([ra0-10.5, ra0+10.5])
     y01 = np.array([dec0, dec0])
     x02 = np.array([ra0, ra0])
     y02 = np.array([dec0-10.5, dec0+10.5])
     axes[2].plot(x01, y01, x02, y02, c='green', lw=0.8)
+
     if plot_flux_centroid:
         axes[2].scatter(ra1,dec1, marker = '+', s=200,lw=0.6,c='blue')
-    coord_fc = tpf.wcs.pixel_to_world(fluxCentroid_X, fluxCentroid_Y)
-    ra_fc, dec_fc = _get_offset(tic_coords,coord_fc)        
     
-    axes[2].scatter(ra,dec, marker = '*', c='blue')
     axes[2].scatter(0,0, marker = '*', c='red')
     if prfError:
         axes[2].set_title("Difference Image Flux Centroid\n(Error in PRF centroid)", fontsize = 11 )
     else:
         axes[2].set_title("Difference Image PRF Centroid\nPRF fit Quality = "+str(round(prfFitQuality,3)), fontsize = 11 )
+
     xmin, xmax = axes[2].get_xlim()
-    ymin, ymax = axes[2].get_ylim()
+    ymin, ymax = axes[2].get_ylim() 
+    for i in range(nstars):
+        bkxmin = min(ra[i]-2, xmin)
+        bkxmax = max(ra[i]+2, xmax)
+        bkymin = min(dec[i]-2, ymin)
+        bkymax = max(dec[i]+2, ymax)
+        size = max(abs(bkxmax-bkxmin), abs(bkymax-bkymin))
+        if size > 54:  
+           break
+        xmin, xmax, ymin, ymax = bkxmin, bkxmax, bkymin, bkymax
     tam1 = abs(xmax-xmin)
     tam2 = abs(ymax-ymin)
     if tam1 > tam2:  
@@ -292,20 +298,23 @@ def centroid_vetting(tpf, epochs, transit_dur, plot=True, **kwargs):
         xmin=xmin-(tam2-tam1)/2
         xmax=xmax+(tam2-tam1)/2
     tam1 = abs(xmax-xmin)
-    z = 0
-    for i in range(nstars_radec):
-        scolor = 'black'
-        if cat[i] == str(TIC_ID):
-            scolor = 'red'
-        z =z + 1
-        axes[2].text(ra[i]-tam1/34,dec[i], z, fontsize=9, c=scolor, zorder=2)
-        
-    axes[2].set_xlabel("RA Offset (arcsec)", fontsize=10,labelpad=2)
-    axes[2].set_ylabel("Dec Offset (arcsec)", fontsize=10,labelpad=0)
+
     axes[2].set_xlim([xmin, xmax])
     axes[2].set_ylim([ymin, ymax])
+    #xmin, xmax = axes[2].get_xlim()
+    #ymin, ymax = axes[2].get_ylim()
+    
+    for i in range(nstars):
+        scolor = 'blue'
+        if cat[i] == str(ticid):
+            scolor = 'red'
+        if ra[i] < xmax and ra[i] > xmin and dec[i] < ymax and dec[i] > ymin: 
+            axes[2].scatter(ra[i],dec[i], marker = '*', c=scolor)
+            axes[2].text(ra[i]-tam1/34,dec[i], i+1, fontsize=9, c=scolor, zorder=2)      
+            
     axes[2].invert_xaxis()
-    z = 0
+    axes[2].set_xlabel("RA Offset (arcsec)", fontsize=10,labelpad=2)
+    axes[2].set_ylabel("Dec Offset (arcsec)", fontsize=10,labelpad=0)
     axes[3].axis('off')
     axes[3].set_xlim([0, 1])
     axes[3].set_ylim([0, 1])
@@ -315,9 +324,10 @@ def centroid_vetting(tpf, epochs, transit_dur, plot=True, **kwargs):
     axes[3].text(0.67, yl1-0.1,'Sep.arcsec', fontsize=9, c='black') 
     star_ok = False
     pm_any = False
+    z = 0
     for i in range(nstars):
         colort = 'black'
-        if cat[i] == str(TIC_ID):
+        if cat[i] == str(ticid):
             star_ok = True
             colort = 'red'
         z =z + 1
@@ -331,18 +341,18 @@ def centroid_vetting(tpf, epochs, transit_dur, plot=True, **kwargs):
 
     if not star_ok:
         z=z+1
-        tic_row = catalogData[catalogData['ID'] == str(TIC_ID)][0]
+        tic_row = catalogData[catalogData['ID'] == str(ticid)][0]
         sep_label =  f"{tic_row['dstArcSec']:6.2f}"
         if not tic_row['has_pm']:
             sep_label += ' (#)'
-        axes[3].text(-0.06, yl1-0.09-z/10, '* - TIC '+str(TIC_ID), fontsize=8, c='red')    
+        axes[3].text(-0.06, yl1-0.09-z/10, '* - TIC '+str(ticid), fontsize=8, c='red')    
         axes[3].text(0.48, yl1-0.09-z/10, f"{tic_row['Tmag']:6.3f}", fontsize=9, c='black')    
         axes[3].text(0.78, yl1-0.09-z/10, sep_label, fontsize=9, c='black')                
 
     if pm_any:
         pm_text = '(#) No proper motion correction.'
     else:
-        pm_text = ' Stars proper motion corrected.'
+        pm_text = ' Stars are proper motion corrected.'
     z = z+1    
     axes[3].text(0.01, yl1-0.12-z/10, pm_text, fontsize=10, c='black')    
 
@@ -368,16 +378,16 @@ def centroid_vetting(tpf, epochs, transit_dur, plot=True, **kwargs):
         prf_centroid_pos = None
         prfFitQuality = None
         img_prf = None
-    return _get_results(ticid, sector, validEpochs, transit_dur, inTransitCad, ooTransitCad, inTMargin, ooTInnerM,
-                                ooTOuterM, tic_pos, flux_centroid_pos, prf_centroid_pos, prfFitQuality, tic_offset, nearest_tics,img_diff, 
-                                img_oot, img_intr, img_prf)
+
+    return _get_results(ticid, sector, validEpochs, transit_dur, inTransitCad, ooTransitCad, inTMargin, ooTInnerM, ooTOuterM, 
+                                tic_pos, flux_centroid_pos, prf_centroid_pos, prfFitQuality, tic_offset, nearest_tics,
+                                img_diff, img_oot, img_intr, img_prf)       
 
 # Difference Image calculation - Adapted from :
-#     @noraeisner - Planet Hunters Coffee Chat - False Positives - In and Out of Flux Comparison 
+# Nora Eisner - Planet Hunters Coffee Chat - False Positives - In Out Transit Flux 
 # https://github.com/noraeisner/PH_Coffee_Chat/blob/main/False%20Positive/False%20positives%20-%20(2)%20in%20out%20transit%20flux.ipynb
 #============================================================================================================
 def _get_in_out_diff_img(tpf, epochs, inTMargin, ooTInnerM, ooTOuterM): 
-    #full_transit_dur, oot_outer_margin, oot_inner_margin):
     #epochs: float or list of floats - If more than one, a mean image of all transits is calculated
     imgs_intr = []; imgs_oot = []
     times = tpf.time.value
@@ -394,27 +404,59 @@ def _get_in_out_diff_img(tpf, epochs, inTMargin, ooTInnerM, ooTOuterM):
     img_diff = img_oot - img_intr
     return img_diff, img_intr, img_oot
 
-def _check_epochs(tpf, epochs, transit_dur, **kwargs):
-    inTMargin, ooTInner, ooTOuter = _get_margins(transit_dur, **kwargs)
+def _get_margins(transit_dur, intransit_margin=0, ootransit_inner=0, ootransit_outer=0): 
+    if intransit_margin == 0:
+        intransit_margin = round(transit_dur * 0.4,3)
+    if ootransit_inner == 0:
+        ootransit_inner = round(transit_dur * 0.75, 3)
+    if ootransit_outer == 0:
+        ootransit_outer = round(ootransit_inner + transit_dur, 3)
+    return intransit_margin, ootransit_inner, ootransit_outer
+    
+def _check_epochs(tpf, epochs, intransit_margin, ootransit_inner, ootransit_outer):
     validEpochs = []
     inTransitCad = 0
     ooTransitCad = 0
     tv = tpf.time.value
     for T0 in epochs:
-        t = tv[abs(T0-tv)<ooTOuter]
+        t = tv[abs(T0-tv)<ootransit_outer]
         diff = np.diff(t)
-        if np.max(diff) < np.min(diff)*10:
+        if np.max(diff) < np.min(diff) * 8:   #discard transits wuth gaps
             validEpochs.append(T0)
-            inTransitCad += len(t[abs(T0 - t) < inTMargin])
-            ooTransitCad += len(t[(abs(T0-t) < ooTOuter) * (abs(T0-t) > ooTInner)])
-    return validEpochs, inTMargin, ooTInner, ooTOuter, inTransitCad, ooTransitCad
- 
-def _get_margins(transit_dur, **kwargs):
-    inTMargin = kwargs.get('intransit_margin', round(transit_dur * 0.4,3))
-    ooTInner = kwargs.get('ootransit_inner', round(transit_dur * 0.75, 3))
-    ooTOuter = kwargs.get('ootransit_outer', ooTInner + transit_dur) 
-    return inTMargin, ooTInner, ooTOuter
+            inTransitCad += len(t[abs(T0 - t) < intransit_margin])
+            ooTransitCad += len(t[(abs(T0-t) < ootransit_outer) * (abs(T0-t) > ootransit_inner)])
+        # error if validEpochs == []        
+    return validEpochs, inTransitCad, ooTransitCad
 
+def _get_tpf_stars_catalog(tpf, maglim):
+    radSearch = 1 / 10 # radius in degrees
+    medx = tpf.shape[1:][1]/2
+    medy = tpf.shape[1:][0]/2
+    coord_center = tpf.wcs.pixel_to_world(medx, medy)
+    pix_scale = 21.0 #Tess
+    radius=Angle(np.min(tpf.shape[1:]) * pix_scale, "arcsec")
+    attempts = 0
+    while attempts < 3:
+        try:
+            catDatatpf = Catalogs.query_region(coordinates=coord_center, radius = radius, catalog = "TIC")
+            break
+        except Exception as error:
+            attempts += 1
+            if attempts > 2:
+                raise
+    catDatatpf = catDatatpf[catDatatpf['Tmag']<maglim]
+    coord_corr_tpf = _correct_with_proper_motion(
+        np.nan_to_num(np.asarray(catDatatpf['ra'])) * u.deg, 
+        np.nan_to_num(np.asarray(catDatatpf['dec'])) * u.deg,
+        np.nan_to_num(np.asarray(catDatatpf['pmRA'])) * u.milliarcsecond / u.year,
+        np.nan_to_num(np.asarray(catDatatpf['pmDEC'])) * u.milliarcsecond / u.year,    
+        Time('2000', format='byear'), # TIC is in J2000 epoch
+        tpf.time[0] ,  # the observed time for the tpf
+    )
+    catDatatpf['ra_corr'] = coord_corr_tpf.ra.to_value(unit="deg")
+    catDatatpf['dec_corr'] = coord_corr_tpf.dec.to_value(unit="deg")
+    return catDatatpf
+ 
 def _get_results(*args):
     return dict(zip(
                 (
@@ -462,12 +504,14 @@ def _mask_edges(img):
                     )
     return xx, yy, img, points
     #ax.add_patch(points[i][j])    
-                
+                    
 def _get_offset(coord1,coord2):
     ra_offset = (coord2.ra - coord1.ra) * np.cos(coord1.dec.to('radian'))
     dec_offset = (coord2.dec - coord1.dec)
     return float(str(ra_offset.to('arcsec'))[:-6]), float(str(dec_offset.to('arcsec'))[:-6])
 
+def formatwarning(msg, *args, **kwargs):
+    return 'Warning:\n' + str(msg) + '\n'
 #====================================================================
 # proper motion correction implemented by Sam Lee (@orionlee)  https://github.com/orionlee
 #====================================================================
@@ -530,12 +574,13 @@ def _sim_image_data_diff(c, prf, data):
 def _render_prf(prf, coef):
     # coef = [x, y, a, o]
     return coef[3] + coef[2]*prf.evaluate(coef[0] + 0.5, coef[1] + 0.5)
-# end =============================================================================
-# ---- additional lightcurve plots to help visualization of the time span measured ----
+    
+# =================================================================
+# ---- additional lightcurve plots to help visualization of the time span measured --------
 #--------------- Sam Lee - https://github.com/orionlee    -----------------------------
-#--------------------------------------------------------------------------------------
+#------------------------------------------------------------------------------------
 
-def show_transit_margins(tpf, epoch, transit_dur, interact=False, **kwargs):
+def show_transit_margins(tpf, epoch, transit_dur, intransit_margin=0, ootransit_inner=0, ootransit_outer=0, interact=False):
     #def iPlot(inT, ooTI, ooTO, T0):
     #   plot(inT.value, ooTI.value, ooTO.value, T0)
     #   return inT, ooTO, ooTI
@@ -556,17 +601,23 @@ def show_transit_margins(tpf, epoch, transit_dur, interact=False, **kwargs):
         return
         
     if isinstance(epoch, float): epoch = [epoch]
-    inTransitM, innerM, outerM = _get_margins(transit_dur, **kwargs)
+    #
+    inTMargin, ooTInnerM, ooTOuterM = _get_margins(transit_dur, intransit_margin, ootransit_inner, ootransit_outer)
+    #
     lc_target = tpf.to_lightcurve().remove_nans()
     T0 = epoch[0]
-    lc = lc_target.truncate(T0 - outerM * 1.25, T0 + outerM * 1.25)
+    lc = lc_target.truncate(T0 - ooTOuterM * 1.25, T0 + ooTOuterM * 1.25)
     if interact == False:
-        plot(inTransitM, innerM, outerM, T0)
+        plot(inTMargin, ooTInnerM, ooTOuterM, T0)
         return
-    xmax = T0 + outerM * 1.25
-    inT = widgets.FloatSlider(value=inTransitM, min=0.01, max=innerM, step=0.002,disabled=False,readout_format='.3f')
-    ooTI = widgets.FloatSlider(value=innerM, min=inTransitM, max=outerM, step=0.002, disabled=False,readout_format='.3f')
-    ooTO = widgets.FloatSlider(value=outerM, min=innerM, max=xmax-T0-0.01, step=0.002, disabled=False,readout_format='.3f')
+    #------------ Interact = True -------------------
+    from ipywidgets import interact,fixed, Label, HBox
+    import ipywidgets as widgets
+    #
+    xmax = T0 + ooTOuterM * 1.25
+    inT = widgets.FloatSlider(value=inTMargin, min=0.01, max=ooTInnerM, step=0.002,disabled=False,readout_format='.3f')
+    ooTI = widgets.FloatSlider(value=ooTInnerM, min=inTMargin, max=ooTOuterM, step=0.002, disabled=False,readout_format='.3f')
+    ooTO = widgets.FloatSlider(value=ooTOuterM, min=ooTInnerM, max=xmax-T0-0.01, step=0.002, disabled=False,readout_format='.3f')
     BinT = HBox([Label('InTransit Margin'), inT])
     BooTI = HBox([Label('ooT Inner Margin'), ooTI])
     BooTO = HBox([Label('ooT Outer Margin'), ooTO])
