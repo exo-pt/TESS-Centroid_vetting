@@ -47,6 +47,10 @@ def centroid_vetting(tpf, epochs, transit_dur, intransit_margin=0, ootransit_inn
     inTMargin, ooTInnerM, ooTOuterM = _get_margins(transit_dur, intransit_margin, ootransit_inner, ootransit_outer)
     #
     validEpochs, inTransitCad, ooTransitCad = _check_epochs(tpf, epochs,  inTMargin, ooTInnerM, ooTOuterM)   
+    if len(validEpochs) < 1:
+        raise Exception(f"All supplied epochs are deemed invalid due to gaps. epochs = {epochs}")
+    if len(epochs) > len(validEpochs):
+        warnings.warn(f"Some epochs are deemed invalid due to gaps. Excluded epochs: {set(epochs) - set(validEpochs)}")    
     #
     img_diff, img_intr, img_oot = _get_in_out_diff_img(tpf, validEpochs, inTMargin, ooTInnerM, ooTOuterM)
     #
