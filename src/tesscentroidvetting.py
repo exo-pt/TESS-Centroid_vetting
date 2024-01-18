@@ -86,6 +86,9 @@ def centroid_vetting(tpf, epochs, transit_dur, intransit_margin=0, ootransit_inn
         circular_mask[max(yy-1,0):min(yy+2,shapeY+1), max(xx-2,0):min(xx+3,shapeX+1)] = True        
         fluxCentroid_X, fluxCentroid_Y = lk.utils.centroid_quadratic(img_diff, mask=circular_mask)
     # 
+    if np.isnan(fluxCentroid_X) or np.isnan(fluxCentroid_Y):
+        raise Exception(f"Failed to derive flux centroid: {fluxCentroid_X, fluxCentroid_Y} . Consider to adjust the in-transit / out-of-transit margins.")
+    #
     flux_centroid_pos = (fluxCentroid_X, fluxCentroid_Y)
     #
     prfCentroid_X, prfCentroid_Y, prfFitQuality, img_prf= _get_PRF_centroid(tpf, img_diff, fluxCentroid_X, fluxCentroid_Y)
