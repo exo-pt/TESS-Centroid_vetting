@@ -18,7 +18,7 @@ import tessprfmodel as prfmodel
 
 
 def centroid_vetting(tpf, epochs, transit_dur, intransit_margin=0, ootransit_inner=0, ootransit_outer=0,
-                                plot=True, plot_flux_centroid=False, mask_edges= False):
+                                plot=True, plot_flux_centroid=False, mask_edges= False, discard_epochs_with_gaps=True):
     '''
     Minimum Parameters:,
             tpf                     [Tess TargetPixelFile]
@@ -46,7 +46,12 @@ def centroid_vetting(tpf, epochs, transit_dur, intransit_margin=0, ootransit_inn
     #
     inTMargin, ooTInnerM, ooTOuterM = _get_margins(transit_dur, intransit_margin, ootransit_inner, ootransit_outer)
     #
-    validEpochs, inTransitCad, ooTransitCad = _check_epochs(tpf, epochs,  inTMargin, ooTInnerM, ooTOuterM)   
+    if discard_epochs_with_gaps:
+        gap_factor = 8  # discard epochs with data gap > 8 * cadence
+    else:
+        gap_factor = 999999999
+    
+    validEpochs, inTransitCad, ooTransitCad = _check_epochs(tpf, epochs,  inTMargin, ooTInnerM, ooTOuterM, gap_factor)   
     if len(validEpochs) < 1:
         raise Exception(f"All supplied epochs are deemed invalid due to gaps. epochs = {epochs}")
     if len(epochs) > len(validEpochs):
@@ -417,7 +422,7 @@ def _get_margins(transit_dur, intransit_margin=0, ootransit_inner=0, ootransit_o
         ootransit_outer = round(ootransit_inner + transit_dur, 3)
     return intransit_margin, ootransit_inner, ootransit_outer
     
-def _check_epochs(tpf, epochs, intransit_margin, ootransit_inner, ootransit_outer):
+def _check_epochs(tpf, epochs, intransit_margin, ootransit_inner, ootransit_outer, gap_factor):
     validEpochs = []
     inTransitCad = 0
     ooTransitCad = 0
@@ -425,7 +430,7 @@ def _check_epochs(tpf, epochs, intransit_margin, ootransit_inner, ootransit_oute
     for T0 in epochs:
         t = tv[abs(T0-tv)<ootransit_outer]
         diff = np.diff(t)
-        if np.max(diff) < np.min(diff) * 8:   #discard transits wuth gaps
+        if np.max(diff) < np.min(diff) * gap_factor:   #discard transits wuth gaps
             validEpochs.append(T0)
             inTransitCad += len(t[abs(T0 - t) < intransit_margin])
             ooTransitCad += len(t[(abs(T0-t) < ootransit_outer) * (abs(T0-t) > ootransit_inner)])
@@ -568,6 +573,7 @@ def _get_PRF_centroid(tpf, img_diff, flux_centroid_x, flux_centroid_y):
 def _tess_PRF_centroid(prf, diffImage, qfc):
     data = diffImage.copy()
     seed = np.array([qfc[0], qfc[1], 1, 0])
+
     r = minimize(_sim_image_data_diff, seed, method="L-BFGS-B",args = (prf, data))
     simData = _render_prf(prf, r.x)
     prfFitQuality = np.corrcoef(simData.ravel(), data.ravel())[0,1]
