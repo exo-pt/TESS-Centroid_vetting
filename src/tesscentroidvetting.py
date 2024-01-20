@@ -58,6 +58,12 @@ def centroid_vetting(tpf, epochs, transit_dur, intransit_margin=0, ootransit_inn
         warnings.warn(f"Some epochs are deemed invalid due to gaps. Excluded epochs: {set(epochs) - set(validEpochs)}")    
     #
     img_diff, img_intr, img_oot = _get_in_out_diff_img(tpf, validEpochs, inTMargin, ooTInnerM, ooTOuterM)
+    img_diff_to_return = img_diff.copy()  # the instance that will be returned to call\er
+    # img_diff is used to determining centroid. 
+    # the implementation (lk.utils.centroid_quadratic()) might not be able to handle negative flux in soem cases, 
+    # so we apply an offset to re-zero the flux to be non-negative in the copy used internally.
+    if np.min(img_diff) < 0:
+        img_diff = img_diff - np.min(img_diff)
     #
     ntransits = len(validEpochs)
     warnings.formatwarning = formatwarning
@@ -393,7 +399,7 @@ def centroid_vetting(tpf, epochs, transit_dur, intransit_margin=0, ootransit_inn
 
     return _get_results(ticid, sector, validEpochs, transit_dur, inTransitCad, ooTransitCad, inTMargin, ooTInnerM, ooTOuterM, 
                                 tic_pos, flux_centroid_pos, prf_centroid_pos, prfFitQuality, tic_offset, nearest_tics,
-                                img_diff, img_oot, img_intr, img_prf)       
+                                img_diff_to_return, img_oot, img_intr, img_prf)       
 
 # Difference Image calculation - Adapted from :
 # Nora Eisner - Planet Hunters Coffee Chat - False Positives - In Out Transit Flux 
