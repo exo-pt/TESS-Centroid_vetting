@@ -58,12 +58,9 @@ def centroid_vetting(tpf, epochs, transit_dur, intransit_margin=0, ootransit_inn
         warnings.warn(f"Some epochs are deemed invalid due to gaps. Excluded epochs: {set(epochs) - set(validEpochs)}")    
     #
     img_diff, img_intr, img_oot = _get_in_out_diff_img(tpf, validEpochs, inTMargin, ooTInnerM, ooTOuterM)
-    img_diff_to_return = img_diff.copy()  # the instance that will be returned to call\er
-    # img_diff is used to determining centroid. 
-    # the implementation (lk.utils.centroid_quadratic()) might not be able to handle negative flux in soem cases, 
-    # so we apply an offset to re-zero the flux to be non-negative in the copy used internally.
-    if np.min(img_diff) < 0:
-        img_diff = img_diff - np.min(img_diff)
+    # img_diff_to_return: the instance that will be returned to caller
+    # img_diff is used to determining centroid internally. It will be manipulated in some cases, e.g., when mask_edges is True.
+    img_diff_to_return = img_diff.copy()
     #
     ntransits = len(validEpochs)
     warnings.formatwarning = formatwarning
@@ -76,9 +73,8 @@ def centroid_vetting(tpf, epochs, transit_dur, intransit_margin=0, ootransit_inn
     shapeX = img_diff.shape[1]
     shapeY = img_diff.shape[0]
     yy, xx = np.unravel_index(img_diff.argmax(), img_diff.shape)
-    
     if yy in [0, shapeY] or xx in [0, shapeX]:
-        #brightest pixel in edge - centroid cannot be calculated 
+        #brightest pixel in edge - centroid cannot be calculated by `centroid_quadratic()`
         if mask_edges:
             fluxCentroid_X, fluxCentroid_Y, img_diff, points_mask = _mask_edges(img_diff)       
         else:
@@ -86,11 +82,9 @@ def centroid_vetting(tpf, epochs, transit_dur, intransit_margin=0, ootransit_inn
             plot_flux_centroid = False
             fluxCentroid_X, fluxCentroid_Y = xx, yy  #return brightest pixel in edge  
     else:
-        #calculate flux centroid with circular mask
-        circular_mask = np.full(img_diff.shape, False, dtype=bool)
-        circular_mask[max(yy-2,0):min(yy+3,shapeY+1), max(xx-1,0):min(xx+2,shapeX+1)] = True
-        circular_mask[max(yy-1,0):min(yy+2,shapeY+1), max(xx-2,0):min(xx+3,shapeX+1)] = True        
-        fluxCentroid_X, fluxCentroid_Y = lk.utils.centroid_quadratic(img_diff, mask=circular_mask)
+        #calculate flux centroid - normal case
+        # Note: `centroid_quadratic()` can handle 0 / negative flux in `img_diff`, as long as argument `mask` is not supplied
+        fluxCentroid_X, fluxCentroid_Y = lk.utils.centroid_quadratic(img_diff)
     # 
     if np.isnan(fluxCentroid_X) or np.isnan(fluxCentroid_Y):
         raise Exception(f"Failed to derive flux centroid: {fluxCentroid_X, fluxCentroid_Y} . Consider to adjust the in-transit / out-of-transit margins.")
@@ -500,18 +494,19 @@ def _get_results(*args):
                 ), args))
 
 def _mask_edges(img):
+    minflux = np.nanmin(img)    #to correctly handle negative values in img ################
     emask = np.full(img.shape, True, dtype=bool)
     emask[2:-2, 2:-2] = False
     cimg = img.copy()
-    cimg[emask]=0
-    yy, xx = np.unravel_index(cimg.argmax(), cimg.shape)
+    cimg[emask] = minflux - 1   #minflux - 1 insted of 0 #############################
+    yy, xx = np.unravel_index(cimg.argmax(), cimg.shape)  # brightest non-edge pixel
     maxflux = img[yy,xx]        
     points = [[None for j in range(emask.shape[0])] for i in range(emask.shape[1])]
     for i in range(emask.shape[0]):
         for j in range(emask.shape[1]):
             if emask[i, j]:
-                if img[i,j]>=maxflux:
-                    img[i,j] = 0            
+                if img[i,j]>=maxflux:  # the pixel is at the edge, and >= the flux of the brightest non-edge pixel
+                    img[i,j] = minflux - 1    #minflux - 1 insted of 0 #############################
                     points[i][j] = patches.Rectangle(
                         xy=(j - 0.5, i - 0.5),
                         width=1,
@@ -521,7 +516,6 @@ def _mask_edges(img):
                         hatch="///",
                     )
     return xx, yy, img, points
-    #ax.add_patch(points[i][j])    
                     
 def _get_offset(coord1,coord2):
     ra_offset = (coord2.ra - coord1.ra) * np.cos(coord1.dec.to('radian'))
