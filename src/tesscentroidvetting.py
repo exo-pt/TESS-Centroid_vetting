@@ -18,7 +18,7 @@ import tessprfmodel as prfmodel
 
 
 def centroid_vetting(tpf, epochs, transit_dur, intransit_margin=0, ootransit_inner=0, ootransit_outer=0,
-                                plot=True, plot_flux_centroid=False, mask_edges= False, discard_epochs_with_gaps=True):
+                                plot=True, plot_flux_centroid=False, mask_edges= False, warn_epochs_with_gaps=True):
     '''
     Minimum Parameters:,
             tpf                     [Tess TargetPixelFile]
@@ -46,23 +46,21 @@ def centroid_vetting(tpf, epochs, transit_dur, intransit_margin=0, ootransit_inn
     #
     inTMargin, ooTInnerM, ooTOuterM = _get_margins(transit_dur, intransit_margin, ootransit_inner, ootransit_outer)
     #
-    if discard_epochs_with_gaps:
+    if warn_epochs_with_gaps:
         gap_factor = 8  # discard epochs with data gap > 8 * cadence
     else:
         gap_factor = 999999999
     
-    validEpochs, inTransitCad, ooTransitCad = _check_epochs(tpf, epochs,  inTMargin, ooTInnerM, ooTOuterM, gap_factor)   
-    if len(validEpochs) < 1:
-        raise Exception(f"All supplied epochs are deemed invalid due to gaps. epochs = {epochs}")
-    if len(epochs) > len(validEpochs):
-        warnings.warn(f"Some epochs are deemed invalid due to gaps. Excluded epochs: {set(epochs) - set(validEpochs)}")    
+    possibleProblemEpochs, inTransitCad, ooTransitCad = _check_epochs(tpf, epochs,  inTMargin, ooTInnerM, ooTOuterM, gap_factor)   
+    if (len(possibleProblemEpochs) > 0): 
+        warnings.warn(f"Some epochs are possibly problematic, as they are near gaps: {possibleProblemEpochs}")    
     #
-    img_diff, img_intr, img_oot = _get_in_out_diff_img(tpf, validEpochs, inTMargin, ooTInnerM, ooTOuterM)
+    img_diff, img_intr, img_oot = _get_in_out_diff_img(tpf, epochs, inTMargin, ooTInnerM, ooTOuterM)
     # img_diff_to_return: the instance that will be returned to caller
     # img_diff is used to determining centroid internally. It will be manipulated in some cases, e.g., when mask_edges is True.
     img_diff_to_return = img_diff.copy()
     #
-    ntransits = len(validEpochs)
+    ntransits = len(epochs)
     warnings.formatwarning = formatwarning
     
     ticid = tpf.get_header()['TICID']
@@ -156,7 +154,7 @@ def centroid_vetting(tpf, epochs, transit_dur, intransit_margin=0, ootransit_inn
     nearest_tics = catalogData[:20]['ID','ra','dec','Tmag','dstArcSec','has_pm','ra_no_pm','dec_no_pm','dstArcSec_no_pm']
     
     if not plot:
-        return _get_results(ticid, sector, validEpochs, transit_dur, inTransitCad, ooTransitCad, inTMargin, ooTInnerM, ooTOuterM, 
+        return _get_results(ticid, sector, possibleProblemEpochs, transit_dur, inTransitCad, ooTransitCad, inTMargin, ooTInnerM, ooTOuterM, 
                                     tic_pos, flux_centroid_pos, prf_centroid_pos, prfFitQuality, tic_offset, nearest_tics,
                                     img_diff, img_oot, img_intr, img_prf)
     #######################################
@@ -383,8 +381,8 @@ def centroid_vetting(tpf, epochs, transit_dur, intransit_margin=0, ootransit_inn
 
     plt.gcf().subplots_adjust(bottom=0.25, top=0.95, left=0.05,right=0.95,wspace=0.26)
 
-    if len(validEpochs) < 6:
-        epochs3 = validEpochs.copy()
+    if len(epochs) < 6:
+        epochs3 = epochs.copy()
         for i,t in enumerate(epochs3):
             epochs3[i] = round(t,3)
         fig.suptitle(TIC2str+' Sector ' +str(sector)+'            Transit epochs (BTJD)= '+str(epochs3)+'            Transit duration (hours)= '+ f'{transit_dur*24:2.3f}',
@@ -404,7 +402,7 @@ def centroid_vetting(tpf, epochs, transit_dur, intransit_margin=0, ootransit_inn
         prfFitQuality = None
         img_prf = None
 
-    return _get_results(ticid, sector, validEpochs, transit_dur, inTransitCad, ooTransitCad, inTMargin, ooTInnerM, ooTOuterM, 
+    return _get_results(ticid, sector, possibleProblemEpochs, transit_dur, inTransitCad, ooTransitCad, inTMargin, ooTInnerM, ooTOuterM, 
                                 tic_pos, flux_centroid_pos, prf_centroid_pos, prfFitQuality, tic_offset, nearest_tics,
                                 img_diff_to_return, img_oot, img_intr, img_prf)       
 
@@ -439,19 +437,19 @@ def _get_margins(transit_dur, intransit_margin=0, ootransit_inner=0, ootransit_o
     return intransit_margin, ootransit_inner, ootransit_outer
     
 def _check_epochs(tpf, epochs, intransit_margin, ootransit_inner, ootransit_outer, gap_factor):
-    validEpochs = []
+    possibleProblemEpochs = []
     inTransitCad = 0
     ooTransitCad = 0
     tv = tpf.time.value
     for T0 in epochs:
         t = tv[abs(T0-tv)<ootransit_outer]
         diff = np.diff(t)
-        if np.max(diff) < np.min(diff) * gap_factor:   #discard transits wuth gaps
-            validEpochs.append(T0)
+        if np.max(diff) < np.min(diff) * gap_factor:
             inTransitCad += len(t[abs(T0 - t) < intransit_margin])
             ooTransitCad += len(t[(abs(T0-t) < ootransit_outer) * (abs(T0-t) > ootransit_inner)])
-        # error if validEpochs == []        
-    return validEpochs, inTransitCad, ooTransitCad
+        else:  # case transits wuth gaps
+            possibleProblemEpochs.append(T0)
+    return possibleProblemEpochs, inTransitCad, ooTransitCad
 
 def _get_tpf_stars_catalog(tpf, maglim):
     radSearch = 1 / 10 # radius in degrees
@@ -487,7 +485,7 @@ def _get_results(*args):
                 (
                     'ticid' ,
                     'sector',
-                    'valid_transit_epochs',     # (list)   #     
+                    'possible_problem_epochs',     # (list)   #     
                     'transit_duration' ,          # in days
                     'inTransit_cadences' ,      # no. of cadences in In Transir Image
                     'ooTransit_cadences' ,     # no. of cadences in Out Of Transir Image
