@@ -73,10 +73,12 @@ def centroid_vetting(tpf, epochs, transit_dur, intransit_margin=0, ootransit_inn
     shapeX = img_diff.shape[1]
     shapeY = img_diff.shape[0]
     yy, xx = np.unravel_index(img_diff.argmax(), img_diff.shape)
+    has_masked_pixels = False
     if yy in [0, shapeY] or xx in [0, shapeX]:
         #brightest pixel in edge - centroid cannot be calculated by `centroid_quadratic()`
         if mask_edges:
-            fluxCentroid_X, fluxCentroid_Y, img_diff, points_mask = _mask_edges(img_diff)       
+            fluxCentroid_X, fluxCentroid_Y, img_diff = _mask_edges(img_diff)       
+            has_masked_pixels = True
         else:
             warnings.warn("Brightest pixel on edge. Flux centroid couldn't be calculated. Use mask_edges=True if suitable.")
             plot_flux_centroid = False
@@ -260,12 +262,23 @@ def centroid_vetting(tpf, epochs, transit_dur, intransit_margin=0, ootransit_inn
     axes[1].set_yticks(np.arange(len(y_list)))
     axes[1].set_yticklabels(y_list)
     axes[1].tick_params(axis='x', labelrotation=90)
-    if mask_edges:
-        for i in range(len(points_mask[0])):
-            for j in range(len(points_mask[1])):
-                if points_mask[i][j] is not None:
-                    axes[1].add_patch(points_mask[i][j]) 
-    if mask_edges:
+    if has_masked_pixels:
+        # for case mask_edges, the flux of masked pixels has been set to minflux - 1
+        # by _mask_edges(). so the new minflux is a reliable indicator a pixel is masked
+        maskedflux = np.nanmin(img_diff)
+        for i in range(img_diff.shape[0]):
+            for j in range(img_diff.shape[1]):
+                if img_diff[i,j] == maskedflux:
+                    patch = patches.Rectangle(
+                        xy=(j - 0.5, i - 0.5),
+                        width=1,
+                        height=1,
+                        color='coral',
+                        fill=False,
+                        hatch="///",
+                    )                   
+                    axes[1].add_patch(patch) 
+    if has_masked_pixels:
         axes[1].set_title("Difference Image (edge mask)\nMean Out - In Transit Flux".format(transit_dur), fontsize = 11 )
     else:
         axes[1].set_title("Difference Image\nMean Out - In Transit Flux".format(transit_dur), fontsize = 11 )
@@ -501,21 +514,12 @@ def _mask_edges(img):
     cimg[emask] = minflux - 1   #minflux - 1 insted of 0 #############################
     yy, xx = np.unravel_index(cimg.argmax(), cimg.shape)  # brightest non-edge pixel
     maxflux = img[yy,xx]        
-    points = [[None for j in range(emask.shape[0])] for i in range(emask.shape[1])]
     for i in range(emask.shape[0]):
         for j in range(emask.shape[1]):
             if emask[i, j]:
                 if img[i,j]>=maxflux:  # the pixel is at the edge, and >= the flux of the brightest non-edge pixel
                     img[i,j] = minflux - 1    #minflux - 1 insted of 0 #############################
-                    points[i][j] = patches.Rectangle(
-                        xy=(j - 0.5, i - 0.5),
-                        width=1,
-                        height=1,
-                        color='coral',
-                        fill=False,
-                        hatch="///",
-                    )
-    return xx, yy, img, points
+    return xx, yy, img
                     
 def _get_offset(coord1,coord2):
     ra_offset = (coord2.ra - coord1.ra) * np.cos(coord1.dec.to('radian'))
