@@ -18,7 +18,7 @@ import tessprfmodel as prfmodel
 
 
 def centroid_vetting(tpf, epochs, transit_dur, intransit_margin=0, ootransit_inner=0, ootransit_outer=0,
-                                plot=True, plot_flux_centroid=False, mask_edges= False, mask=None, warn_epochs_with_gaps=True):
+                                plot=True, plot_flux_centroid=False, mask_edges= False, mask=None, warn_epochs=True):
     '''
     Minimum Parameters:,
             tpf                     [Tess TargetPixelFile]
@@ -42,7 +42,9 @@ def centroid_vetting(tpf, epochs, transit_dur, intransit_margin=0, ootransit_inn
                                indicates the correspond pixel in the difference image is masked.
                                If specified, `mask_edges` is ignored.
                                      [array_like (bool)] default = None
-            
+            warn_epochs        Warn if some epoch is possibly problematic, i.e., some cadences used for the difference image
+                               have fluxes that appear to be outliers.
+                                     [boolean] default = True
         In transit times      :  epoch(s) ± intransit_margin
         Out of transit times:  Between <epoch(s) ± ootransit_outer>  and  <epoch(s) ± ootransit_inner> 
     '''
@@ -50,14 +52,13 @@ def centroid_vetting(tpf, epochs, transit_dur, intransit_margin=0, ootransit_inn
     #
     inTMargin, ooTInnerM, ooTOuterM = _get_margins(transit_dur, intransit_margin, ootransit_inner, ootransit_outer)
     #
-    if warn_epochs_with_gaps:
-        gap_factor = 8  # discard epochs with data gap > 8 * cadence
+    if warn_epochs:
+        sigma = 3
     else:
-        gap_factor = 999999999
-    
-    possibleProblemEpochs, inTransitCad, ooTransitCad = _check_epochs(tpf, epochs,  inTMargin, ooTInnerM, ooTOuterM, gap_factor)   
+        sigma = 999999999
+    possibleProblemEpochs, inTransitCad, ooTransitCad = _check_epochs(tpf, epochs,  inTMargin, ooTInnerM, ooTOuterM, sigma)
     if (len(possibleProblemEpochs) > 0): 
-        warnings.warn(f"Some epochs are possibly problematic, as they are near gaps: {possibleProblemEpochs}")    
+        warnings.warn(f"Some epochs are possibly problematic. They have {sigma}-sigma outliers: {possibleProblemEpochs}")
     #
     img_diff, img_intr, img_oot = _get_in_out_diff_img(tpf, epochs, inTMargin, ooTInnerM, ooTOuterM)
     # img_diff_to_return: the instance that will be returned to caller
@@ -448,18 +449,27 @@ def _get_margins(transit_dur, intransit_margin=0, ootransit_inner=0, ootransit_o
         ootransit_outer = round(ootransit_inner + transit_dur, 3)
     return intransit_margin, ootransit_inner, ootransit_outer
     
-def _check_epochs(tpf, epochs, intransit_margin, ootransit_inner, ootransit_outer, gap_factor):
+def _check_epochs(tpf, epochs, intransit_margin, ootransit_inner, ootransit_outer, sigma=3):
     possibleProblemEpochs = []
     inTransitCad = 0
     ooTransitCad = 0
-    tv = tpf.time.value
+    times = tpf.time.value
+    fluxes = tpf.to_lightcurve().flux.value
+    flux_median = np.nanmedian(fluxes)
+    flux_std = np.nanstd(fluxes)
+    # the range of flux that is deemed non-problematic
+    flux_threshold_min, flux_threshold_max = flux_median - sigma * flux_std, flux_median + sigma * flux_std
     for T0 in epochs:
-        t = tv[abs(T0-tv)<ootransit_outer]
-        diff = np.diff(t)
-        if np.max(diff) < np.min(diff) * gap_factor:
-            inTransitCad += len(t[abs(T0 - t) < intransit_margin])
-            ooTransitCad += len(t[(abs(T0-t) < ootransit_outer) * (abs(T0-t) > ootransit_inner)])
-        else:  # case transits wuth gaps
+        intr = abs(T0 - times) < intransit_margin  # mask of in transit times
+        oot = (abs(T0 - times) < ootransit_outer) * (abs(T0 - times) > ootransit_inner)  # mask of out transit times
+        inTransitCad += np.sum(intr)
+        ooTransitCad += np.sum(oot)
+        # identify problematic cadence (outliers).
+        # for in-transit, only check if flux is larger than the range,
+        # as flux smaller than the range is possibly just the preceivced dip.
+        intr_problem = intr & (fluxes > flux_threshold_max)        
+        oot_problem = oot & ((fluxes < flux_threshold_min) | (fluxes > flux_threshold_max))
+        if len(times[intr_problem | oot_problem]) > 0:
             possibleProblemEpochs.append(T0)
     return possibleProblemEpochs, inTransitCad, ooTransitCad
 
