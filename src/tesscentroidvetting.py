@@ -18,7 +18,7 @@ import tessprfmodel as prfmodel
 
 
 def centroid_vetting(tpf, epochs, transit_dur, intransit_margin=0, ootransit_inner=0, ootransit_outer=0,
-                                plot=True, plot_flux_centroid=False, mask_edges= False, warn_epochs_with_gaps=True):
+                                plot=True, plot_flux_centroid=False, mask_edges= False, mask=None, warn_epochs_with_gaps=True):
     '''
     Minimum Parameters:,
             tpf                     [Tess TargetPixelFile]
@@ -38,6 +38,10 @@ def centroid_vetting(tpf, epochs, transit_dur, intransit_margin=0, ootransit_inn
                                      [boolean] default = False  
             mask_edges         Mask pixels at edge if brighter than brightest pixel in central region
                                      [boolean] default = False (Only can be set if difference image brightest pixel is at edge)
+            mask               A boolean mask, with the same shape as tpf image, where a **True** value
+                               indicates the correspond pixel in the difference image is masked.
+                               If specified, `mask_edges` is ignored.
+                                     [array_like (bool)] default = None
             
         In transit times      :  epoch(s) ± intransit_margin
         Out of transit times:  Between <epoch(s) ± ootransit_outer>  and  <epoch(s) ± ootransit_inner> 
@@ -70,15 +74,23 @@ def centroid_vetting(tpf, epochs, transit_dur, intransit_margin=0, ootransit_inn
     maglim = max(round(tpf_mag) + 8, 19)
     shapeX = img_diff.shape[1]
     shapeY = img_diff.shape[0]
-    yy, xx = np.unravel_index(img_diff.argmax(), img_diff.shape)
     has_masked_pixels = False
+    if mask is not None:
+        mask_edges = False
+        if mask.shape == img_diff.shape and True in mask:
+            img_diff = _get_masked_img(img_diff, mask)
+            has_masked_pixels = True
+        else:
+            raise ValueError(f"Supplied mask's shape {mask.shape} has to be the same as the image's shape {img_diff.mask}.")
+    yy, xx = np.unravel_index(img_diff.argmax(), img_diff.shape)
     if yy in [0, shapeY] or xx in [0, shapeX]:
         #brightest pixel in edge - centroid cannot be calculated by `centroid_quadratic()`
         if mask_edges:
-            fluxCentroid_X, fluxCentroid_Y, img_diff = _mask_edges(img_diff)       
+            img_diff = _mask_edges(img_diff)
+            fluxCentroid_X, fluxCentroid_Y = lk.utils.centroid_quadratic(img_diff)
             has_masked_pixels = True
         else:
-            warnings.warn("Brightest pixel on edge. Flux centroid couldn't be calculated. Use mask_edges=True if suitable.")
+            warnings.warn("Brightest pixel on edge. Flux centroid couldn't be calculated. Use mask_edges=True or supply a mask if suitable.")
             plot_flux_centroid = False
             fluxCentroid_X, fluxCentroid_Y = xx, yy  #return brightest pixel in edge  
     else:
@@ -277,7 +289,7 @@ def centroid_vetting(tpf, epochs, transit_dur, intransit_margin=0, ootransit_inn
                     )                   
                     axes[1].add_patch(patch) 
     if has_masked_pixels:
-        axes[1].set_title("Difference Image (edge mask)\nMean Out - In Transit Flux".format(transit_dur), fontsize = 11 )
+        axes[1].set_title("Difference Image (masked)\nMean Out - In Transit Flux".format(transit_dur), fontsize = 11 )        
     else:
         axes[1].set_title("Difference Image\nMean Out - In Transit Flux".format(transit_dur), fontsize = 11 )
 
@@ -504,6 +516,11 @@ def _get_results(*args):
                     'img_prf'                       # prf image
                 ), args))
 
+def _get_masked_img(img, mask):
+    minflux = np.nanmin(img)
+    img[mask] = minflux-1
+    return img
+
 def _mask_edges(img):
     minflux = np.nanmin(img)    #to correctly handle negative values in img ################
     emask = np.full(img.shape, True, dtype=bool)
@@ -517,7 +534,7 @@ def _mask_edges(img):
             if emask[i, j]:
                 if img[i,j]>=maxflux:  # the pixel is at the edge, and >= the flux of the brightest non-edge pixel
                     img[i,j] = minflux - 1    #minflux - 1 insted of 0 #############################
-    return xx, yy, img
+    return img
                     
 def _get_offset(coord1,coord2):
     ra_offset = (coord2.ra - coord1.ra) * np.cos(coord1.dec.to('radian'))
