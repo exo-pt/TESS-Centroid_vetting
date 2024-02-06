@@ -48,6 +48,7 @@ def centroid_vetting(tpf, epochs, transit_dur, intransit_margin=0, ootransit_inn
         In transit times      :  epoch(s) ± intransit_margin
         Out of transit times:  Between <epoch(s) ± ootransit_outer>  and  <epoch(s) ± ootransit_inner> 
     '''
+    warnings.formatwarning = formatwarning
     if isinstance(epochs, float): epochs = [epochs]
     #
     inTMargin, ooTInnerM, ooTOuterM = _get_margins(transit_dur, intransit_margin, ootransit_inner, ootransit_outer)
@@ -66,7 +67,6 @@ def centroid_vetting(tpf, epochs, transit_dur, intransit_margin=0, ootransit_inn
     img_diff_to_return = img_diff.copy()
     #
     ntransits = len(epochs)
-    warnings.formatwarning = formatwarning
     
     ticid = tpf.get_header()['TICID']
     TIC2str = tpf.get_header()['OBJECT']
