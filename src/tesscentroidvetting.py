@@ -18,7 +18,7 @@ import tessprfmodel as prfmodel
 
 
 def centroid_vetting(tpf, epochs, transit_dur, intransit_margin=0, ootransit_inner=0, ootransit_outer=0,
-                                plot=True, plot_flux_centroid=False, mask_edges= False):
+                                plot=True, plot_flux_centroid=False, mask_edges= False, mask=None, warn_epochs=True):
     '''
     Minimum Parameters:,
             tpf                     [Tess TargetPixelFile]
@@ -38,20 +38,35 @@ def centroid_vetting(tpf, epochs, transit_dur, intransit_margin=0, ootransit_inn
                                      [boolean] default = False  
             mask_edges         Mask pixels at edge if brighter than brightest pixel in central region
                                      [boolean] default = False (Only can be set if difference image brightest pixel is at edge)
-            
+            mask               A boolean mask, with the same shape as tpf image, where a **True** value
+                               indicates the correspond pixel in the difference image is masked.
+                               If specified, `mask_edges` is ignored.
+                                     [array_like (bool)] default = None
+            warn_epochs        Warn if some epoch is possibly problematic, i.e., some cadences used for the difference image
+                               have fluxes that appear to be outliers.
+                                     [boolean] default = True
         In transit times      :  epoch(s) ± intransit_margin
         Out of transit times:  Between <epoch(s) ± ootransit_outer>  and  <epoch(s) ± ootransit_inner> 
     '''
+    warnings.formatwarning = formatwarning
     if isinstance(epochs, float): epochs = [epochs]
     #
     inTMargin, ooTInnerM, ooTOuterM = _get_margins(transit_dur, intransit_margin, ootransit_inner, ootransit_outer)
     #
-    validEpochs, inTransitCad, ooTransitCad = _check_epochs(tpf, epochs,  inTMargin, ooTInnerM, ooTOuterM)   
+    if warn_epochs:
+        sigma = 3
+    else:
+        sigma = 999999999
+    possibleProblemEpochs, inTransitCad, ooTransitCad = _check_epochs(tpf, epochs,  inTMargin, ooTInnerM, ooTOuterM, sigma)
+    if (len(possibleProblemEpochs) > 0): 
+        warnings.warn(f"Some epochs are possibly problematic. They have {sigma}-sigma outliers: {possibleProblemEpochs}")
     #
-    img_diff, img_intr, img_oot = _get_in_out_diff_img(tpf, validEpochs, inTMargin, ooTInnerM, ooTOuterM)
+    img_diff, img_intr, img_oot = _get_in_out_diff_img(tpf, epochs, inTMargin, ooTInnerM, ooTOuterM)
+    # img_diff_to_return: the instance that will be returned to caller
+    # img_diff is used to determining centroid internally. It will be manipulated in some cases, e.g., when mask_edges is True.
+    img_diff_to_return = img_diff.copy()
     #
-    ntransits = len(validEpochs)
-    warnings.formatwarning = formatwarning
+    ntransits = len(epochs)
     
     ticid = tpf.get_header()['TICID']
     TIC2str = tpf.get_header()['OBJECT']
@@ -60,23 +75,33 @@ def centroid_vetting(tpf, epochs, transit_dur, intransit_margin=0, ootransit_inn
     maglim = max(round(tpf_mag) + 8, 19)
     shapeX = img_diff.shape[1]
     shapeY = img_diff.shape[0]
-    yy, xx = np.unravel_index(img_diff.argmax(), img_diff.shape)
-    
-    if yy in [0, shapeY] or xx in [0, shapeX]:
-        #brightest pixel in edge - centroid cannot be calculated 
-        if mask_edges:
-            fluxCentroid_X, fluxCentroid_Y, img_diff, points_mask = _mask_edges(img_diff)       
+    has_masked_pixels = False
+    if mask is not None:
+        mask_edges = False
+        if mask.shape == img_diff.shape and True in mask:
+            img_diff = _get_masked_img(img_diff, mask)
+            has_masked_pixels = True
         else:
-            warnings.warn("Brightest pixel on edge. Flux centroid couldn't be calculated. Use mask_edges=True if suitable.")
+            raise ValueError(f"Supplied mask's shape {mask.shape} has to be the same as the image's shape {img_diff.mask}.")
+    yy, xx = np.unravel_index(img_diff.argmax(), img_diff.shape)
+    if yy in [0, shapeY] or xx in [0, shapeX]:
+        #brightest pixel in edge - centroid cannot be calculated by `centroid_quadratic()`
+        if mask_edges:
+            img_diff = _mask_edges(img_diff)
+            fluxCentroid_X, fluxCentroid_Y = lk.utils.centroid_quadratic(img_diff)
+            has_masked_pixels = True
+        else:
+            warnings.warn("Brightest pixel on edge. Flux centroid couldn't be calculated. Use mask_edges=True or supply a mask if suitable.")
             plot_flux_centroid = False
             fluxCentroid_X, fluxCentroid_Y = xx, yy  #return brightest pixel in edge  
     else:
-        #calculate flux centroid with circular mask
-        circular_mask = np.full(img_diff.shape, False, dtype=bool)
-        circular_mask[max(yy-2,0):min(yy+3,shapeY+1), max(xx-1,0):min(xx+2,shapeX+1)] = True
-        circular_mask[max(yy-1,0):min(yy+2,shapeY+1), max(xx-2,0):min(xx+3,shapeX+1)] = True        
-        fluxCentroid_X, fluxCentroid_Y = lk.utils.centroid_quadratic(img_diff, mask=circular_mask)
+        #calculate flux centroid - normal case
+        # Note: `centroid_quadratic()` can handle 0 / negative flux in `img_diff`, as long as argument `mask` is not supplied
+        fluxCentroid_X, fluxCentroid_Y = lk.utils.centroid_quadratic(img_diff)
     # 
+    if np.isnan(fluxCentroid_X) or np.isnan(fluxCentroid_Y):
+        raise Exception(f"Failed to derive flux centroid: {fluxCentroid_X, fluxCentroid_Y} . Consider to adjust the in-transit / out-of-transit margins.")
+    #
     flux_centroid_pos = (fluxCentroid_X, fluxCentroid_Y)
     #
     prfCentroid_X, prfCentroid_Y, prfFitQuality, img_prf= _get_PRF_centroid(tpf, img_diff, fluxCentroid_X, fluxCentroid_Y)
@@ -142,7 +167,7 @@ def centroid_vetting(tpf, epochs, transit_dur, intransit_margin=0, ootransit_inn
     nearest_tics = catalogData[:20]['ID','ra','dec','Tmag','dstArcSec','has_pm','ra_no_pm','dec_no_pm','dstArcSec_no_pm']
     
     if not plot:
-        return _get_results(ticid, sector, validEpochs, transit_dur, inTransitCad, ooTransitCad, inTMargin, ooTInnerM, ooTOuterM, 
+        return _get_results(ticid, sector, possibleProblemEpochs, transit_dur, inTransitCad, ooTransitCad, inTMargin, ooTInnerM, ooTOuterM, 
                                     tic_pos, flux_centroid_pos, prf_centroid_pos, prfFitQuality, tic_offset, nearest_tics,
                                     img_diff, img_oot, img_intr, img_prf)
     #######################################
@@ -248,13 +273,24 @@ def centroid_vetting(tpf, epochs, transit_dur, intransit_margin=0, ootransit_inn
     axes[1].set_yticks(np.arange(len(y_list)))
     axes[1].set_yticklabels(y_list)
     axes[1].tick_params(axis='x', labelrotation=90)
-    if mask_edges:
-        for i in range(len(points_mask[0])):
-            for j in range(len(points_mask[1])):
-                if points_mask[i][j] is not None:
-                    axes[1].add_patch(points_mask[i][j]) 
-    if mask_edges:
-        axes[1].set_title("Difference Image (edge mask)\nMean Out - In Transit Flux".format(transit_dur), fontsize = 11 )
+    if has_masked_pixels:
+        # for case mask_edges, the flux of masked pixels has been set to minflux - 1
+        # by _mask_edges(). so the new minflux is a reliable indicator a pixel is masked
+        maskedflux = np.nanmin(img_diff)
+        for i in range(img_diff.shape[0]):
+            for j in range(img_diff.shape[1]):
+                if img_diff[i,j] == maskedflux:
+                    patch = patches.Rectangle(
+                        xy=(j - 0.5, i - 0.5),
+                        width=1,
+                        height=1,
+                        color='coral',
+                        fill=False,
+                        hatch="///",
+                    )                   
+                    axes[1].add_patch(patch) 
+    if has_masked_pixels:
+        axes[1].set_title("Difference Image (masked)\nMean Out - In Transit Flux".format(transit_dur), fontsize = 11 )        
     else:
         axes[1].set_title("Difference Image\nMean Out - In Transit Flux".format(transit_dur), fontsize = 11 )
 
@@ -358,8 +394,8 @@ def centroid_vetting(tpf, epochs, transit_dur, intransit_margin=0, ootransit_inn
 
     plt.gcf().subplots_adjust(bottom=0.25, top=0.95, left=0.05,right=0.95,wspace=0.26)
 
-    if len(validEpochs) < 6:
-        epochs3 = validEpochs.copy()
+    if len(epochs) < 6:
+        epochs3 = epochs.copy()
         for i,t in enumerate(epochs3):
             epochs3[i] = round(t,3)
         fig.suptitle(TIC2str+' Sector ' +str(sector)+'            Transit epochs (BTJD)= '+str(epochs3)+'            Transit duration (hours)= '+ f'{transit_dur*24:2.3f}',
@@ -379,9 +415,9 @@ def centroid_vetting(tpf, epochs, transit_dur, intransit_margin=0, ootransit_inn
         prfFitQuality = None
         img_prf = None
 
-    return _get_results(ticid, sector, validEpochs, transit_dur, inTransitCad, ooTransitCad, inTMargin, ooTInnerM, ooTOuterM, 
+    return _get_results(ticid, sector, possibleProblemEpochs, transit_dur, inTransitCad, ooTransitCad, inTMargin, ooTInnerM, ooTOuterM, 
                                 tic_pos, flux_centroid_pos, prf_centroid_pos, prfFitQuality, tic_offset, nearest_tics,
-                                img_diff, img_oot, img_intr, img_prf)       
+                                img_diff_to_return, img_oot, img_intr, img_prf)       
 
 # Difference Image calculation - Adapted from :
 # Nora Eisner - Planet Hunters Coffee Chat - False Positives - In Out Transit Flux 
@@ -413,20 +449,29 @@ def _get_margins(transit_dur, intransit_margin=0, ootransit_inner=0, ootransit_o
         ootransit_outer = round(ootransit_inner + transit_dur, 3)
     return intransit_margin, ootransit_inner, ootransit_outer
     
-def _check_epochs(tpf, epochs, intransit_margin, ootransit_inner, ootransit_outer):
-    validEpochs = []
+def _check_epochs(tpf, epochs, intransit_margin, ootransit_inner, ootransit_outer, sigma=3):
+    possibleProblemEpochs = []
     inTransitCad = 0
     ooTransitCad = 0
-    tv = tpf.time.value
+    times = tpf.time.value
+    fluxes = tpf.to_lightcurve().flux.value
+    flux_median = np.nanmedian(fluxes)
+    flux_std = np.nanstd(fluxes)
+    # the range of flux that is deemed non-problematic
+    flux_threshold_min, flux_threshold_max = flux_median - sigma * flux_std, flux_median + sigma * flux_std
     for T0 in epochs:
-        t = tv[abs(T0-tv)<ootransit_outer]
-        diff = np.diff(t)
-        if np.max(diff) < np.min(diff) * 8:   #discard transits wuth gaps
-            validEpochs.append(T0)
-            inTransitCad += len(t[abs(T0 - t) < intransit_margin])
-            ooTransitCad += len(t[(abs(T0-t) < ootransit_outer) * (abs(T0-t) > ootransit_inner)])
-        # error if validEpochs == []        
-    return validEpochs, inTransitCad, ooTransitCad
+        intr = abs(T0 - times) < intransit_margin  # mask of in transit times
+        oot = (abs(T0 - times) < ootransit_outer) * (abs(T0 - times) > ootransit_inner)  # mask of out transit times
+        inTransitCad += np.sum(intr)
+        ooTransitCad += np.sum(oot)
+        # identify problematic cadence (outliers).
+        # for in-transit, only check if flux is larger than the range,
+        # as flux smaller than the range is possibly just the preceivced dip.
+        intr_problem = intr & (fluxes > flux_threshold_max)        
+        oot_problem = oot & ((fluxes < flux_threshold_min) | (fluxes > flux_threshold_max))
+        if len(times[intr_problem | oot_problem]) > 0:
+            possibleProblemEpochs.append(T0)
+    return possibleProblemEpochs, inTransitCad, ooTransitCad
 
 def _get_tpf_stars_catalog(tpf, maglim):
     radSearch = 1 / 10 # radius in degrees
@@ -462,7 +507,7 @@ def _get_results(*args):
                 (
                     'ticid' ,
                     'sector',
-                    'valid_transit_epochs',     # (list)   #     
+                    'possible_problem_epochs',     # (list)   #     
                     'transit_duration' ,          # in days
                     'inTransit_cadences' ,      # no. of cadences in In Transir Image
                     'ooTransit_cadences' ,     # no. of cadences in Out Of Transir Image
@@ -481,29 +526,25 @@ def _get_results(*args):
                     'img_prf'                       # prf image
                 ), args))
 
+def _get_masked_img(img, mask):
+    minflux = np.nanmin(img)
+    img[mask] = minflux-1
+    return img
+
 def _mask_edges(img):
+    minflux = np.nanmin(img)    #to correctly handle negative values in img ################
     emask = np.full(img.shape, True, dtype=bool)
     emask[2:-2, 2:-2] = False
     cimg = img.copy()
-    cimg[emask]=0
-    yy, xx = np.unravel_index(cimg.argmax(), cimg.shape)
+    cimg[emask] = minflux - 1   #minflux - 1 insted of 0 #############################
+    yy, xx = np.unravel_index(cimg.argmax(), cimg.shape)  # brightest non-edge pixel
     maxflux = img[yy,xx]        
-    points = [[None for j in range(emask.shape[0])] for i in range(emask.shape[1])]
     for i in range(emask.shape[0]):
         for j in range(emask.shape[1]):
             if emask[i, j]:
-                if img[i,j]>=maxflux:
-                    img[i,j] = 0            
-                    points[i][j] = patches.Rectangle(
-                        xy=(j - 0.5, i - 0.5),
-                        width=1,
-                        height=1,
-                        color='coral',
-                        fill=False,
-                        hatch="///",
-                    )
-    return xx, yy, img, points
-    #ax.add_patch(points[i][j])    
+                if img[i,j]>=maxflux:  # the pixel is at the edge, and >= the flux of the brightest non-edge pixel
+                    img[i,j] = minflux - 1    #minflux - 1 insted of 0 #############################
+    return img
                     
 def _get_offset(coord1,coord2):
     ra_offset = (coord2.ra - coord1.ra) * np.cos(coord1.dec.to('radian'))
@@ -564,6 +605,7 @@ def _get_PRF_centroid(tpf, img_diff, flux_centroid_x, flux_centroid_y):
 def _tess_PRF_centroid(prf, diffImage, qfc):
     data = diffImage.copy()
     seed = np.array([qfc[0], qfc[1], 1, 0])
+
     r = minimize(_sim_image_data_diff, seed, method="L-BFGS-B",args = (prf, data))
     simData = _render_prf(prf, r.x)
     prfFitQuality = np.corrcoef(simData.ravel(), data.ravel())[0,1]
