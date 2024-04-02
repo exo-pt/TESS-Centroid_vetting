@@ -5,6 +5,12 @@ This centroid presentation allows to identify the source of the dips in a lightc
 
 ![Img](https://github.com/exo-pt/TESS-Centroid_vetting/blob/main/tesscentroidvetting_example.png?raw=true)
 
+## Installation
+Since version 1.2.0, a package is available at PyPi
+So, the simplest way of installing TESS-Centroid_Vetting is using pip:
+
+`pip install tesscentroidvetting`
+
 ## Dependencies:
 - numpy
 - matplotlib

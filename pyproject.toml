@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tesscentroidvetting"
+description = "TESS Centroid Vetting"
+version = "1.2.0"
+authors=[{name='Rafael Rodrigues', email='rafael.rodrgs@gmail.com'}]
+readme = "README.md"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Topic :: Scientific/Engineering :: Astronomy",
+]
+keywords = [
+	"TESS",
+	"centroids",
+	"exoplanets",
+	"PRF",
+	"vetting",
+	"transits",
+	"python",
+]
+dependencies = [
+	"astropy>=5.1",
+	"astroquery>=0.4.6",
+	"lightkurve>=2.4.1",
+	"matplotlib>=3.7.3",
+	"numpy>=1.22.0",
+	"scipy>=1.8.1",
+]
+
+[project.urls]
+"Homepage" = "https://github.com/exo-pt/TESS-Centroid_vetting"
