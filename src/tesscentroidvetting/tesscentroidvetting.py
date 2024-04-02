@@ -13,7 +13,8 @@ from astropy import units as u
 from astropy.table import Table
 from scipy.optimize import minimize
 import matplotlib.ticker as ticker
-from .tessprfmodel import SimpleTessPRF
+import tessprfmodel as prfmodel
+
 
 def centroid_vetting(
     tpf,
@@ -501,7 +502,7 @@ def centroid_vetting(
     z = z + 1
     axes[3].text(0.01, yl1 - 0.12 - z / 10, pm_text, fontsize=10, c="black")
 
-    plt.gcf().subplots_adjust(bottom=0.25, top=0.88, left=0.05, right=0.95, wspace=0.26)
+    plt.gcf().subplots_adjust(bottom=0.25, top=0.95, left=0.05, right=0.95, wspace=0.26)
 
     if len(epochs) < 6:
         epochs3 = epochs.copy()
@@ -517,7 +518,7 @@ def centroid_vetting(
             + f"{transit_dur*24:2.3f}",
             fontsize=12,
             x=0.49,
-            y=1.0,
+            y=1.04,
         )
     else:
         fig.suptitle(
@@ -530,7 +531,7 @@ def centroid_vetting(
             + f"{transit_dur*24:2.3f}",
             fontsize=12,
             x=0.49,
-            y=1.0,  #1.04
+            y=1.04,
         )
     com_xlabel = (
         "In Transit cadences: "
@@ -545,7 +546,7 @@ def centroid_vetting(
         + f"{ooTInnerM:2.3f}d"
     )
     com_xlabel += "  to  Epoch ± " + f"{ooTOuterM:2.3f}d)"
-    fig.text(0.5, 0.93, com_xlabel, ha="center", fontsize=10) #0.97
+    fig.text(0.5, 0.97, com_xlabel, ha="center", fontsize=10)
     plt.show()
 
     if prfError:
@@ -794,7 +795,7 @@ def _get_PRF_centroid(tpf, img_diff, flux_centroid_x, flux_centroid_y):
         tpf.row - 0.5,
         tpf.row + rows - 0.5,
     )
-    prf = SimpleTessPRF(
+    prf = prfmodel.SimpleTessPRF(
         shape=img_diff.shape,
         sector=tpf.sector,
         camera=tpf.camera,
