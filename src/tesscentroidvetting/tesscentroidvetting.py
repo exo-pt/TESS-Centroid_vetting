@@ -582,9 +582,10 @@ def centroid_vetting(
 # https://github.com/noraeisner/PH_Coffee_Chat/blob/main/False%20Positive/False%20positives%20-%20(2)%20in%20out%20transit%20flux.ipynb
 # ============================================================================================================
 def _get_in_out_diff_img(tpf, epochs, inTMargin, ooTInnerM, ooTOuterM):
-    # epochs: float or list of floats - If more than one, a mean image of all transits is calculated
+    # epochs: float or list of floats - If more than one, a median image of all transits is calculated
     imgs_intr = []
     imgs_oot = []
+    imgs_diff = []
     times = tpf.time.value
     flux = tpf.flux.value
     for T0 in epochs:
@@ -592,13 +593,15 @@ def _get_in_out_diff_img(tpf, epochs, inTMargin, ooTInnerM, ooTOuterM):
         oot = (abs(T0 - times) < ooTOuterM) * (
             abs(T0 - times) > ooTInnerM
         )  # mask of out transit times
-        img_intr = np.nanmean(flux[intr, :, :], axis=0)
-        img_oot = np.nanmean(flux[oot, :, :], axis=0)
+        img_intr = np.nanmedian(flux[intr, :, :], axis=0)
+        img_oot = np.nanmedian(flux[oot, :, :], axis=0)
+        img_diff = img_oot - img_intr
         imgs_intr.append(img_intr)
         imgs_oot.append(img_oot)
-    img_intr = np.nanmean(imgs_intr, axis=0)
-    img_oot = np.nanmean(imgs_oot, axis=0)
-    img_diff = img_oot - img_intr
+        imgs_diff.append(img_diff)
+    img_intr = np.nanmedian(imgs_intr, axis=0)
+    img_oot = np.nanmedian(imgs_oot, axis=0)
+    img_diff = np.nanmedian(imgs_diff, axis=0) 
     return img_diff, img_intr, img_oot
 
 
