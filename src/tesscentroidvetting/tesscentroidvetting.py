@@ -15,6 +15,7 @@ from scipy.optimize import minimize
 import matplotlib.ticker as ticker
 from .tessprfmodel import SimpleTessPRF
 
+
 def centroid_vetting(
     tpf,
     epochs,
@@ -501,7 +502,7 @@ def centroid_vetting(
     z = z + 1
     axes[3].text(0.01, yl1 - 0.12 - z / 10, pm_text, fontsize=10, c="black")
 
-    plt.gcf().subplots_adjust(bottom=0.25, top=0.88, left=0.05, right=0.95, wspace=0.26)
+    plt.gcf().subplots_adjust(bottom=0.25, top=0.95, left=0.05, right=0.95, wspace=0.26)
 
     if len(epochs) < 6:
         epochs3 = epochs.copy()
@@ -517,7 +518,7 @@ def centroid_vetting(
             + f"{transit_dur*24:2.3f}",
             fontsize=12,
             x=0.49,
-            y=1.0,
+            y=1.04,
         )
     else:
         fig.suptitle(
@@ -530,7 +531,7 @@ def centroid_vetting(
             + f"{transit_dur*24:2.3f}",
             fontsize=12,
             x=0.49,
-            y=1.0,  #1.04
+            y=1.04,
         )
     com_xlabel = (
         "In Transit cadences: "
@@ -545,7 +546,7 @@ def centroid_vetting(
         + f"{ooTInnerM:2.3f}d"
     )
     com_xlabel += "  to  Epoch ± " + f"{ooTOuterM:2.3f}d)"
-    fig.text(0.5, 0.93, com_xlabel, ha="center", fontsize=10) #0.97
+    fig.text(0.5, 0.97, com_xlabel, ha="center", fontsize=10)
     plt.show()
 
     if prfError:
@@ -582,7 +583,7 @@ def centroid_vetting(
 # https://github.com/noraeisner/PH_Coffee_Chat/blob/main/False%20Positive/False%20positives%20-%20(2)%20in%20out%20transit%20flux.ipynb
 # ============================================================================================================
 def _get_in_out_diff_img(tpf, epochs, inTMargin, ooTInnerM, ooTOuterM):
-    # epochs: float or list of floats - If more than one, a median image of all transits is calculated
+    # epochs: float or list of floats - If more than one, a mean image of all transits is calculated
     imgs_intr = []
     imgs_oot = []
     imgs_diff = []
@@ -601,7 +602,7 @@ def _get_in_out_diff_img(tpf, epochs, inTMargin, ooTInnerM, ooTOuterM):
         imgs_diff.append(img_diff)
     img_intr = np.nanmedian(imgs_intr, axis=0)
     img_oot = np.nanmedian(imgs_oot, axis=0)
-    img_diff = np.nanmedian(imgs_diff, axis=0) 
+    img_diff = np.nanmedian(imgs_diff, axis=0)
     return img_diff, img_intr, img_oot
 
 
