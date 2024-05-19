@@ -134,7 +134,7 @@ def centroid_vetting(
     prfError = False
     if not (
         (round(prfCentroid_X) in range(shapeX))
-        and (round(prfCentroid_X) in range(shapeX))
+        and (round(prfCentroid_Y) in range(shapeY))
     ):
         prfError = True
         _warn("Error calculating PRF centroid. Returned Flux Centroid instead.")
@@ -593,8 +593,8 @@ def _get_in_out_diff_img(tpf, epochs, inTMargin, ooTInnerM, ooTOuterM):
         oot = (abs(T0 - times) < ooTOuterM) * (
             abs(T0 - times) > ooTInnerM
         )  # mask of out transit times
-        img_intr = np.nanmedian(flux[intr, :, :], axis=0)
-        img_oot = np.nanmedian(flux[oot, :, :], axis=0)
+        img_intr = np.nanmean(flux[intr, :, :], axis=0)
+        img_oot = np.nanmean(flux[oot, :, :], axis=0)
         img_diff = img_oot - img_intr
         imgs_intr.append(img_intr)
         imgs_oot.append(img_oot)
