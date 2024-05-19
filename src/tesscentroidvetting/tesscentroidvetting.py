@@ -275,7 +275,7 @@ def centroid_vetting(
 
     cols = 4
     fig, axes = plt.subplots(
-        1, cols, figsize=(12.5, 4.5), subplot_kw=dict(box_aspect=1)
+        1, cols, figsize=(12, 3.8), subplot_kw=dict(box_aspect=1)
     )
     axes[0].imshow(img_oot, cmap=plt.cm.viridis, origin="lower", aspect="auto")
     axes[0].set_title("Mean Out of Transit Flux".format(transit_dur), fontsize=11)
@@ -502,8 +502,7 @@ def centroid_vetting(
     z = z + 1
     axes[3].text(0.01, yl1 - 0.12 - z / 10, pm_text, fontsize=10, c="black")
 
-    plt.gcf().subplots_adjust(bottom=0.25, top=0.95, left=0.05, right=0.95, wspace=0.26)
-
+    plt.gcf().subplots_adjust(bottom=0.0, top=0.95, left=0.05, right=0.98, wspace=0.26)
     if len(epochs) < 6:
         epochs3 = epochs.copy()
         for i, t in enumerate(epochs3):
@@ -518,7 +517,7 @@ def centroid_vetting(
             + f"{transit_dur*24:2.3f}",
             fontsize=12,
             x=0.49,
-            y=1.04,
+            y=0.99,
         )
     else:
         fig.suptitle(
@@ -531,7 +530,7 @@ def centroid_vetting(
             + f"{transit_dur*24:2.3f}",
             fontsize=12,
             x=0.49,
-            y=1.04,
+            y=0.99,
         )
     com_xlabel = (
         "In Transit cadences: "
@@ -546,7 +545,7 @@ def centroid_vetting(
         + f"{ooTInnerM:2.3f}d"
     )
     com_xlabel += "  to  Epoch ± " + f"{ooTOuterM:2.3f}d)"
-    fig.text(0.5, 0.97, com_xlabel, ha="center", fontsize=10)
+    fig.text(0.5, 0.91, com_xlabel, ha="center", fontsize=10)
     plt.show()
 
     if prfError:
