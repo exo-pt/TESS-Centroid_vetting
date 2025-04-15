@@ -546,35 +546,25 @@ def centroid_vetting(
 	axes[3].text(1.05, yl1 - 0.21 - z / 10, ver, fontsize=9, style="italic", c="dimgrey", ha='right')
 
 	plt.gcf().subplots_adjust(bottom=0.0, top=0.95, left=0.05, right=0.98, wspace=0.26)
-	if len(epochs) < 6:
-		epochs3 = epochs.copy()
-		for i, t in enumerate(epochs3):
-			epochs3[i] = round(t, 3)
-		fig.suptitle(
-			TIC2str
-			+ " Sector "
-			+ str(sector)
-			+ "  Transit epochs (BTJD)= "
-			+ str(epochs3)
-			+ "  Transit duration (hours)= "
-			+ f"{transit_dur*24:2.3f}",
-			fontsize=12,
-			x=0.49,
-			y=0.99,
-		)
+
+	epochs3 = [round(t, 3) for t in epochs]
+	if len(epochs3) < 6:
+		epochs_str = str(epochs3)
 	else:
-		fig.suptitle(
-			TIC2str
-			+ " Sector "
-			+ str(sector)
-			+ "  Total transits = "
-			+ str(ntransits)
-			+ "  Transit duration (hours)= "
-			+ f"{transit_dur*24:2.3f}",
-			fontsize=12,
-			x=0.49,
-			y=0.99,
-		)
+		epochs_str = f"[{epochs3[0]}, {epochs3[1]}, ..., {epochs3[-1]}] ({len(epochs3)})"
+
+	fig.suptitle(
+		TIC2str
+		+ " Sector "
+		+ str(sector)
+		+ "  Transit epochs (BTJD)= "
+		+ epochs_str
+		+ "  Transit duration (hours)= "
+		+ f"{transit_dur*24:2.3f}",
+		fontsize=12,
+		x=0.49,
+		y=0.99,
+	)
 	com_xlabel = (
 		"In Transit cadences: "
 		+ str(inTransitCad)
