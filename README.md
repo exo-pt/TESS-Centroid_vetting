@@ -1,7 +1,7 @@
 # TESS centroid_vetting
 
 Attempt to make a centroid vetting function graphically similar to the one used in the DV reports of TCE's produced by the TESS Science Processing Pipeline.<br/>
-This centroid presentation allows to identify the source of the dips in a lightcurve, and discard eventual false positives, but was limited to targets with Threshold Crossing Events (TCE).
+This centroid presentation allows to identify the source of the dips in a lightcurve, discarding eventual false positives and identifying possible sources of contamination.
 
 ![Img](https://github.com/exo-pt/TESS-Centroid_vetting/blob/main/tesscentroidvetting_example.png?raw=true)
 
