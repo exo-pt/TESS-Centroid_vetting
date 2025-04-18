@@ -58,7 +58,7 @@ def centroid_vetting(
 									have fluxes that appear to be outliers.
 									 [boolean] default = True
 			ticid			   TIC ID of the star if tpf obtained from an FFI cutout (TESScut)
-			maglim			  Maximum magnitude of displayed stars (default = TMag + 8)
+			maglim			  Maximum magnitude of displayed stars (default = TMag + 6)
 
 		In transit times	:  epoch(s) ± intransit_margin
 		Out of transit times:  Between <epoch(s) ± ootransit_outer>  and  <epoch(s) ± ootransit_inner>
@@ -114,7 +114,7 @@ def centroid_vetting(
 
 	TIC2str = 'TIC ' + str(ticid)
 	if maglim == None:
-		maglim = max(round(tpf_mag) + 8, 19)
+		maglim = max(round(tpf_mag) + 6, 17)
 	else:
 		maglim = max(round(tpf_mag), maglim)
 
