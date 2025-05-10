@@ -166,11 +166,12 @@ def centroid_vetting(
 				and (round(prfCentroid_Y) in range(shapeY))
 		):
 			prfError = True
+			_warn("Error calculating PRF centroid (Minimize function out of bounds).\nReturned Flux Centroid instead.")
 	except:
 		prfError = True
+		_warn("Internal error calculating PRF centroid. Returned Flux Centroid instead.")
 	#
 	if prfError:
-		_warn("Error calculating PRF centroid. Returned Flux Centroid instead.")
 		prfCentroid_X, prfCentroid_Y = fluxCentroid_X, fluxCentroid_Y
 		plot_flux_centroid = False
 
@@ -861,7 +862,8 @@ def _tess_PRF_centroid(prf, diffImage, qfc):
 	data = diffImage.copy()
 	seed = np.array([qfc[0], qfc[1], 1, 0])
 
-	r = minimize(_sim_image_data_diff, seed, method="L-BFGS-B", args=(prf, data))
+	#r = minimize(_sim_image_data_diff, seed, method="L-BFGS-B", args=(prf, data))
+	r = minimize(_sim_image_data_diff, seed, method="SLSQP", args=(prf, data))
 	simData = _render_prf(prf, r.x)
 	prfFitQuality = np.corrcoef(simData.ravel(), data.ravel())[0, 1]
 	return r.x, prfFitQuality, simData
