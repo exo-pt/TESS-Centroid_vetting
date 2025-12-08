@@ -191,6 +191,7 @@ def centroid_vetting(
 			if attempts > 2:
 				raise
 
+	catalogData = catalogData[(catalogData["disposition"] != "DUPLICATE") & (catalogData["disposition"] != "ARTIFACT")]
 	catalogData = catalogData[catalogData["Tmag"] < maglim]
 	# Proper motion correction implementation by Sam Lee (orionlee)
 	if "ra_no_pm" not in catalogData.colnames:
@@ -702,6 +703,7 @@ def _get_tpf_stars_catalog(tpf, maglim):
 			attempts += 1
 			if attempts > 2:
 				raise
+	catDatatpf = catDatatpf[(catDatatpf["disposition"] != "DUPLICATE") & (catDatatpf["disposition"] != "ARTIFACT")]
 	catDatatpf = catDatatpf[catDatatpf["Tmag"] < maglim]
 	coord_corr_tpf = _correct_with_proper_motion(
 		np.nan_to_num(np.asarray(catDatatpf["ra"])) * u.deg,
