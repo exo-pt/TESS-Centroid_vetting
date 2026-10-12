@@ -1,16 +1,16 @@
 [build-system]
-requires = ["setuptools"]
+requires = ["setuptools>=61.0.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "tesscentroidvetting"
 description = "TESS Centroid Vetting"
 dynamic = ["version", "dependencies"]
-authors=[{name='Rafael Rodrigues', email='rafael.rodrgs@gmail.com'}]
+authors = [{name = 'Rafael Rodrigues', email = 'rafael.rodrgs@gmail.com'}]
 readme = "README.md"
+license = "MIT"
 classifiers = [
     "Programming Language :: Python :: 3",
-    "License :: OSI Approved :: MIT License",
     "Topic :: Scientific/Engineering :: Astronomy",
 ]
 keywords = [
@@ -24,15 +24,14 @@ keywords = [
 ]
 
 [project.urls]
-"Homepage" = "https://github.com/exo-pt/TESS-Centroid_vetting"
+Homepage = "https://github.com/exo-pt/TESS-Centroid_vetting"
 
 [tool.setuptools.dynamic]
 dependencies = {file = ["requirements.txt"]}
 version = {attr = "tesscentroidvetting.version.__version__"}
 
-[tool.setuptools.package-dir]
-tesscentroidvetting = "src/tesscentroidvetting"
+[tool.setuptools.packages.find]
+where = ["src"]
 
 [tool.setuptools]
 include-package-data = true
-
